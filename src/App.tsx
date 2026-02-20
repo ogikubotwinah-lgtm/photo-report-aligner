@@ -1,10 +1,10 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { ImageData, LayoutOptions } from './types';
+import type { ImageData, LayoutOptions } from "./types";
 import LayoutControls from './components/LayoutControls';
 import pptxgen from 'pptxgenjs';
 import { LAYOUT } from './layout';
-import { motion, Reorder } from 'framer-motion';
-
+import { Reorder } from 'framer-motion';
+import RowBoard from "./components/RowBoard";
 
 
 const App: React.FC = () => {
@@ -12,7 +12,6 @@ const App: React.FC = () => {
   const step12RowRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   // 今どの段落にいるか
-  const [currentRowIndex, setCurrentRowIndex] = useState(0);
 
   // STEP1.2の全体位置（任意）
   const step12Ref = useRef<HTMLDivElement | null>(null);
@@ -51,13 +50,7 @@ const App: React.FC = () => {
 
   // 現在のページのデータへのエイリアス
   const images = allPagesImages[currentPage];
-  const isPending = useCallback(
-  (id: string) => {
-    const item = images.find(i => i.id === id);
-    return !!item && item.row > 0 && !item.orderConfirmed;
-  },
-  [images]
-);
+  
 
   const history = allPagesHistory[currentPage];
 
@@ -129,6 +122,8 @@ const App: React.FC = () => {
   });
 
   const [copyStatus, setCopyStatus] = useState<string>('SVGコピー');
+  const [step12DraggingId, setStep12DraggingId] = useState<string | null>(null);
+  const [step12OverRow, setStep12OverRow] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const recordHistory = useCallback(() => {
@@ -197,48 +192,6 @@ const App: React.FC = () => {
     });
   };
 
-  const updateImageOrder = (id: string, newIndex: number) => {
-    recordHistory();
-    setImages((prev: ImageData[]) => {
-      const target = prev.find(img => img.id === id);
-      if (!target) return prev;
-      const rowId = target.row;
-      const rowImages = prev.filter(img => img.row === rowId);
-      const otherImagesInRow = rowImages.filter(img => img.id !== id);
-      const nextRow = new Array(rowImages.length).fill(null);
-      nextRow[newIndex] = { ...target, orderConfirmed: true };
-      let otherPtr = 0;
-      for (let i = 0; i < nextRow.length; i++) {
-        if (nextRow[i] === null) {
-          nextRow[i] = otherImagesInRow[otherPtr++];
-        }
-      }
-      let rowIdx = 0;
-      return prev.map(img => (img.row === rowId ? nextRow[rowIdx++] : img));
-    });
-  };
-
-  const shiftImagePosition = (id: string, direction: 'left' | 'right' | 'far-left' | 'far-right') => {
-    recordHistory();
-    setImages((prev: ImageData[]) => {
-      const target = prev.find(img => img.id === id);
-      if (!target || !target.orderConfirmed) return prev;
-      const sameRow = prev.filter(img => img.row === target.row);
-      const others = prev.filter(img => img.row !== target.row);
-      const idx = sameRow.findIndex(img => img.id === id);
-      let newIdx = idx;
-      if (direction === 'left') newIdx = idx - 1;
-      else if (direction === 'right') newIdx = idx + 1;
-      else if (direction === 'far-left') newIdx = 0;
-      else if (direction === 'far-right') newIdx = sameRow.length - 1;
-      if (newIdx < 0 || newIdx >= sameRow.length || newIdx === idx) return prev;
-      const nextSameRow = [...sameRow];
-      const [item] = nextSameRow.splice(idx, 1);
-      nextSameRow.splice(newIdx, 0, item);
-      return [...others, ...nextSameRow];
-    });
-  };
-
   const removeImage = (id: string) => {
     recordHistory();
     setImages((prev: ImageData[]) => prev.filter(img => img.id !== id));
@@ -270,27 +223,7 @@ const reorderPendingRowByIds = useCallback((rowNum: number, orderedIds: string[]
 }, [recordHistory, setImages]);
 
 
-const reorderPendingRow = useCallback((rowNum: number, fromId: string, toId: string) => {
-  if (fromId === toId) return;
 
-  recordHistory();
-  setImages((prev: ImageData[]) => {
-    const rowItems = prev.filter(i => i.row === rowNum && !i.orderConfirmed);
-
-    const fromIndex = rowItems.findIndex(i => i.id === fromId);
-    const toIndex = rowItems.findIndex(i => i.id === toId);
-
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return prev;
-
-    const nextRow = [...rowItems];
-    const [moved] = nextRow.splice(fromIndex, 1);
-    nextRow.splice(toIndex, 0, moved);
-
-    // prev の中の「該当rowの未確定」部分だけを nextRow で置き換える
-    let ptr = 0;
-    return prev.map(i => (i.row === rowNum && !i.orderConfirmed) ? nextRow[ptr++] : i);
-  });
-}, [recordHistory, setImages]);
 
 
 
@@ -322,10 +255,7 @@ useEffect(() => {
 
 
   const unassignedImages = useMemo(() => images.filter(img => img.row === 0), [images]);
-  const pendingRowIndices = useMemo(() => {
-    const rowNums = Array.from(new Set(images.filter(img => img.row > 0 && !img.orderConfirmed).map(img => img.row)));
-    return rowNums.sort();
-  }, [images]);
+  
 
 
   const confirmedImages = useMemo(() => images.filter(img => img.row > 0 && img.orderConfirmed), [images]);
@@ -575,6 +505,7 @@ ${svgParts.join('\n')}
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20 font-sans">
+      <RowBoard images={images} setImages={setImages} />
       {/* プレビューモーダル */}
       {previewId && (
         <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur flex items-center justify-center p-10" onClick={() => setPreviewId(null)}>
@@ -700,75 +631,105 @@ ${svgParts.join('\n')}
     </div>
 
     <div className="space-y-8">
-      {pendingRowIndices.map((rowNum) => (
-        <div
-  key={rowNum}
-  ref={(el) => {
-    step12RowRefs.current[rowNum] = el;
-  }}
-  className="space-y-3"
->
-          <div className="flex items-center gap-2">
-            <div className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider">
-              段落 {rowNum}
+      {[1, 2, 3, 4].map((rowNum) => {
+        const rowImages = images.filter(i => i.row === rowNum && !i.orderConfirmed);
+        const orderedIds = rowImages.map(i => i.id);
+        const isDropTarget = step12OverRow === rowNum && !!step12DraggingId;
+        if (rowImages.length === 0 && !step12DraggingId) return null;
+        return (
+          <div
+            key={rowNum}
+            ref={(el) => { step12RowRefs.current[rowNum] = el; }}
+            className="space-y-3"
+            onDragOver={(e) => { if (!step12DraggingId) return; e.preventDefault(); setStep12OverRow(rowNum); }}
+            onDragEnter={() => { if (step12DraggingId) setStep12OverRow(rowNum); }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setStep12OverRow(null); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const id = e.dataTransfer.getData("text/plain");
+              if (id) updateImageRow(id, rowNum);
+              setStep12DraggingId(null);
+              setStep12OverRow(null);
+            }}
+            style={{
+              outline: isDropTarget ? '2px solid #4f46e5' : undefined,
+              background: isDropTarget ? '#eef2ff' : undefined,
+              borderRadius: 16,
+              padding: isDropTarget ? 6 : undefined,
+              transition: 'all 0.12s',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                段落 {rowNum}
+              </div>
+              <div className="h-px bg-slate-100 flex-1" />
             </div>
-            <div className="h-px bg-slate-100 flex-1" />
+            <Reorder.Group
+              key={`row-${rowNum}`}
+              axis="x"
+              values={orderedIds}
+              onReorder={(newOrder) => reorderPendingRowByIds(rowNum, newOrder)}
+              className="flex flex-wrap gap-3 p-3 bg-slate-50/50 rounded-2xl border border-slate-100/50"
+              style={{ minHeight: isDropTarget && rowImages.length === 0 ? 72 : undefined }}
+            >
+              {rowImages.map((img, idx) => (
+                <Reorder.Item
+                  key={img.id}
+                  value={img.id}
+                  className="bg-white border rounded-2xl shadow-sm select-none"
+                  whileDrag={{
+                    scale: 1.05,
+                    boxShadow: "0px 16px 40px rgba(0,0,0,0.20)",
+                    zIndex: 50,
+                  }}
+                  onClick={() => setPreviewId(img.id)}
+                  onPointerDown={() => {
+                    if (!recordedOnceRef.current) {
+                      recordHistory();
+                      recordedOnceRef.current = true;
+                    }
+                  }}
+                  onPointerUp={() => { recordedOnceRef.current = false; }}
+                >
+                  {/* 段落間移動ハンドル */}
+                  <div
+                    draggable
+                    onPointerDownCapture={(e) => e.stopPropagation()}
+                    onMouseDownCapture={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      setStep12DraggingId(img.id);
+                      e.dataTransfer.setData("text/plain", img.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragEnd={() => {
+                      setStep12DraggingId(null);
+                      setStep12OverRow(null);
+                    }}
+                    className="py-1 px-2 rounded-t-2xl bg-slate-100 hover:bg-indigo-100 text-[10px] text-slate-400 hover:text-indigo-500 font-bold text-center transition-colors"
+                    style={{ cursor: 'grab' }}
+                    title="ドラッグして別段落へ移動"
+                  >
+                    ⠿ 移動
+                  </div>
+                  <div className="relative p-2" style={{ cursor: step12DraggingId ? 'default' : 'grab' }}>
+                    <img
+                      src={img.dataUrl}
+                      style={{ transform: `rotate(${img.rotation}deg)` }}
+                      className="w-16 h-16 object-contain rounded-xl bg-white pointer-events-none"
+                    />
+                    <div className="absolute -top-2 -left-2 w-6 h-6 rounded-lg bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center border-2 border-white shadow-sm">
+                      {idx + 1}
+                    </div>
+                  </div>
+                </Reorder.Item>
+              ))}
+            </Reorder.Group>
           </div>
-
-          {(() => {
-  const rowImages = images.filter(i => i.row === rowNum && !i.orderConfirmed);
-  const orderedIds = rowImages.map(i => i.id);
-
-  return (
-    <Reorder.Group
-    　key={`row-${rowNum}`}
-      axis="x"
-      values={orderedIds}
-      onReorder={(newOrder) => reorderPendingRowByIds(rowNum, newOrder)}
-      className="flex flex-wrap gap-3 p-3 bg-slate-50/50 rounded-2xl border border-slate-100/50"
-    >
-      {rowImages.map((img, idx) => (
-        <Reorder.Item
-  key={img.id}
-  value={img.id}
-  className="bg-white border rounded-2xl p-2 shadow-sm cursor-grab active:cursor-grabbing select-none"
-  whileDrag={{
-  scale: 1.05,
-  boxShadow: "0px 16px 40px rgba(0,0,0,0.20)",
-  zIndex: 50,
-}}
-
-  onClick={() => setPreviewId(img.id)}
-
-  onPointerDown={() => {
-    if (!recordedOnceRef.current) {
-      recordHistory();
-      recordedOnceRef.current = true;
-    }
-  }}
-  onPointerUp={() => {
-    recordedOnceRef.current = false;
-  }}
->
-
-          <div className="relative">
-            <img
-              src={img.dataUrl}
-              style={{ transform: `rotate(${img.rotation}deg)` }}
-              className="w-16 h-16 object-contain rounded-xl bg-white pointer-events-none"
-            />
-            <div className="absolute -top-2 -left-2 w-6 h-6 rounded-lg bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center border-2 border-white shadow-sm">
-              {idx + 1}
-            </div>
-          </div>
-        </Reorder.Item>
-      ))}
-    </Reorder.Group>
-  );
-})()}
-
-        </div>
-      ))}
+        );
+      })}
     </div>
 
     <div className="pt-4 border-t border-slate-100 flex justify-end">
@@ -933,9 +894,13 @@ ${svgParts.join('\n')}
             </div>
           </div>
         </div>
+      <h2 style={{ marginTop: 20 }}>▼ 段落ドラッグ移動（RowBoard）</h2>
+<div style={{ padding: 8 }}>images: {images.length} 枚</div>
+<RowBoard images={images} setImages={setImages} rows={4} />
       </main>
     </div>
   );
 };
+
 
 export default App;
