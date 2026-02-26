@@ -18,3 +18,18 @@ export interface LayoutOptions {
   containerWidth: number;
   backgroundColor: string;
 }
+
+export interface ReportFields {
+  reportDate: string;
+  refHospital: string;
+  refDoctor: string;
+  ownerLastName: string;
+  petName: string;
+  firstVisitDate: string;
+  anesthesiaDate: string;
+  attendingVet: string; // 新規：担当獣医師
+  initialText: string;
+  procedureText: string;
+  postText: string;
+  chiefComplaint: string; // 新規：主訴
+}

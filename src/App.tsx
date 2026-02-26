@@ -1,11 +1,14 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import type { ImageData, LayoutOptions } from "./types";
 import LayoutControls from './components/LayoutControls';
 import pptxgen from 'pptxgenjs';
 import { LAYOUT } from './layout';
 import RowBoard from "./components/RowBoard";
 import TemplatePicker from './components/TemplatePicker';
-import TEMPLATES from './data/templates';
+
+// shared helpers for text rendering and unit conversion
+import { buildSvgTextParts, addPptxText } from './reportTextRenderer';
+import { cmToInch } from './utils/units';
 
 
 // Minimal date normalizer used by onBlur handlers in this file.
@@ -76,9 +79,11 @@ const App: React.FC = () => {
     petName: '',
     firstVisitDate: '',
     anesthesiaDate: '',
+    attendingVet: '', // 新規：担当獣医師
     initialText: '',
     procedureText: '',
-    postText: ''
+    postText: '',
+    chiefComplaint: '' // 新規：主訴
   });
 
   // 現在のページのデータへのエイリアス
@@ -127,24 +132,6 @@ const App: React.FC = () => {
     };
   }, []);
 
-  /**
-   * テキストが枠内に収まるようにフォントサイズを計算するユーティリティ
-   */
-  const fitTextToBox = (text: string, box: { w: number, h: number }, basePt: number, minPt: number): number => {
-    if (!text) return basePt;
-    const chars = text.length;
-    let currentSize = basePt;
-    const boxArea = box.w * box.h;
-    while (currentSize > minPt) {
-      const charSizeCm = (currentSize / 72) * 2.54;
-      const estimatedRequiredArea = chars * (charSizeCm * charSizeCm) * 1.2;
-      if (estimatedRequiredArea <= boxArea) {
-        return currentSize;
-      }
-      currentSize -= 0.5;
-    }
-    return minPt;
-  };
 
   const [options, setOptions] = useState<LayoutOptions>({
     spacing: 1,
@@ -321,7 +308,6 @@ const confirmedImages = useMemo(() => images.filter(img => img.row > 0), [images
 
 const calculateSvgData = useCallback(() => {
   const { rowResults } = getCalculatedLayout();
-  const dims = getPageDimensions(currentPage);
 
   // scale and pxPerCm are based on the full slide width so layout.ts cm coords map directly
   const scale = options.containerWidth / LAYOUT.SLIDE.WIDTH_CM;
@@ -363,189 +349,8 @@ const calculateSvgData = useCallback(() => {
     });
   });
 
-  const escapeXml = (s: string) =>
-    String(s ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-
-  // Helper: convert pt -> px for SVG
-  const ptToPx = (pt: number) => pt * (96 / 72);
-  const svgFontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
-
-  // Canvas-based text measurement helpers (for more accurate wrap)
-  const getMeasureContext = (fontPx: number, fontFamily: string) => {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d')!;
-    ctx.font = `${fontPx}px ${fontFamily}`;
-    return ctx;
-  };
-
-  const isJapaneseChar = (ch: string) => /[\u3000-\u30FF\u4E00-\u9FFF\uFF01-\uFF60]/.test(ch);
-
-  const wrapTextByMeasure = (text: string, maxWidthPx: number, ctx: CanvasRenderingContext2D) => {
-    const paragraphs = text.split('\n');
-    const out: string[] = [];
-    paragraphs.forEach(par => {
-      if (par === '') { out.push(''); return; }
-      let i = 0;
-      const L = par.length;
-      while (i < L) {
-        // If japanese char at i, do char-by-char
-        if (isJapaneseChar(par[i])) {
-          let line = '';
-          while (i < L) {
-            const next = line + par[i];
-            const w = ctx.measureText(next).width;
-            if (w > maxWidthPx && line.length > 0) break;
-            line = next;
-            i += 1;
-          }
-          out.push(line);
-        } else {
-          // ascii/latin: try to take words
-          const rest = par.slice(i);
-          const words = rest.split(/(\s+)/);
-          let line = '';
-          let consumed = 0;
-          for (let wi = 0; wi < words.length; wi++) {
-            const wToken = words[wi];
-            const candidate = line + wToken;
-            const width = ctx.measureText(candidate).width;
-            if (width > maxWidthPx && line.length > 0) break;
-            line = candidate;
-            consumed += wToken.length;
-          }
-          if (line.length === 0) {
-            // fallback: single char
-            line = par[i];
-            i += 1;
-          } else {
-            i += consumed;
-          }
-          out.push(line);
-        }
-      }
-    });
-    return out;
-  };
-
-  const clampLines = (lines: string[], maxLines: number) => {
-    if (lines.length <= maxLines) return lines;
-    const visible = lines.slice(0, maxLines);
-    const last = visible[visible.length - 1] || '';
-    visible[visible.length - 1] = last.length > 0 ? (last.replace(/\s+$/, '') + '…') : '…';
-    return visible;
-  };
-
-  // Render fixed header (logo + hospital info) and text fields using LAYOUT constants
-  if (currentPage === 1) {
-  const textCfg = LAYOUT.PAGE1.TEXT as any;
-
-    // Logo placeholder
-    if (textCfg.LOGO) {
-      const lx = slideOffsetX + textCfg.LOGO.x * pxPerCm;
-      const ly = slideOffsetY + textCfg.LOGO.y * pxPerCm;
-      const lw = textCfg.LOGO.w * pxPerCm;
-      const lh = textCfg.LOGO.h * pxPerCm;
-      svgParts.push(`  <rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" fill="#f3f4f6" stroke="#e5e7eb" />`);
-    svgParts.push(`  <text x="${lx + lw / 2}" y="${ly + lh / 2}" font-size="${ptToPx(10)}" fill="#666" text-anchor="middle" dominant-baseline="middle">ロゴ</text>`);
-    }
-
-    // Hospital info (fixed)
-    if (textCfg.HOSPITAL_INFO) {
-      const hx = slideOffsetX + textCfg.HOSPITAL_INFO.x * pxPerCm;
-      const hy = slideOffsetY + (textCfg.HOSPITAL_INFO.y + textCfg.HOSPITAL_INFO.h / 2) * pxPerCm;
-      svgParts.push(`  <text x="${hx}" y="${hy}" font-size="${ptToPx(LAYOUT.FONTS.INFO_NAME)}" fill="#111" font-family="${svgFontFamily}" dominant-baseline="hanging">荻窪ツイン動物病院</text>`);
-    }
-
-    // Header fields (report date, title, recipient, doctor, owner, pet)
-    const reportDateX = slideOffsetX + textCfg.REPORT_DATE.x * pxPerCm;
-    const reportDateY = slideOffsetY + textCfg.REPORT_DATE.y * pxPerCm;
-    svgParts.push(`  <text x="${reportDateX}" y="${reportDateY}" font-size="${ptToPx(LAYOUT.FONTS.BODY_BASE)}" fill="#000" font-family="${svgFontFamily}" text-anchor="end" dominant-baseline="hanging">${escapeXml('報告日：' + (reportFields.reportDate || ''))}</text>`);
-
-    const titleX = slideOffsetX + textCfg.TITLE.x * pxPerCm;
-    const titleY = slideOffsetY + textCfg.TITLE.y * pxPerCm;
-    svgParts.push(`  <text x="${titleX}" y="${titleY}" font-size="${ptToPx(LAYOUT.FONTS.MAIN_TITLE)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml('ご紹介患者についてのご報告')}</text>`);
-
-    const refHospX = slideOffsetX + textCfg.REF_HOSPITAL.x * pxPerCm;
-    const refHospY = slideOffsetY + textCfg.REF_HOSPITAL.y * pxPerCm;
-    svgParts.push(`  <text x="${refHospX}" y="${refHospY}" font-size="${ptToPx(LAYOUT.FONTS.INFO_NAME)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml((reportFields.refHospital || '○○動物病院') + '　御中')}</text>`);
-
-    const refDocX = slideOffsetX + textCfg.REF_DOCTOR.x * pxPerCm;
-    const refDocY = slideOffsetY + textCfg.REF_DOCTOR.y * pxPerCm;
-    svgParts.push(`  <text x="${refDocX}" y="${refDocY}" font-size="${ptToPx(LAYOUT.FONTS.INFO_NAME)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml((reportFields.refDoctor || '△△') + ' 先生')}</text>`);
-
-    const ownerX = slideOffsetX + textCfg.OWNER_LASTNAME.x * pxPerCm;
-    const ownerY = slideOffsetY + textCfg.OWNER_LASTNAME.y * pxPerCm;
-    svgParts.push(`  <text x="${ownerX}" y="${ownerY}" font-size="${ptToPx(LAYOUT.FONTS.INFO_NAME)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml('飼い主様：' + (reportFields.ownerLastName || '姓') + ' 様')}</text>`);
-
-    const petX = slideOffsetX + textCfg.PET_NAME.x * pxPerCm;
-    const petY = slideOffsetY + textCfg.PET_NAME.y * pxPerCm;
-    svgParts.push(`  <text x="${petX}" y="${petY}" font-size="${ptToPx(LAYOUT.FONTS.INFO_NAME)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml('ペット名：' + (reportFields.petName || '名前'))}</text>`);
-
-    // Combined body block into FREE_TEXT_INITIAL box
-    const bodyCfg = textCfg.FREE_TEXT_INITIAL;
-    if (bodyCfg) {
-      const bx = slideOffsetX + bodyCfg.x * pxPerCm;
-      const by = slideOffsetY + bodyCfg.y * pxPerCm;
-      const bw = bodyCfg.w * pxPerCm;
-      const bh = bodyCfg.h * pxPerCm;
-
-      const fontPt = LAYOUT.FONTS.BODY_BASE;
-      const fontPx = ptToPx(fontPt);
-      const fontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
-      const lineHeight = fontPx * 1.15;
-      const maxLines = Math.max(1, Math.floor(bh / lineHeight));
-
-      const combined = ['【初診時】', reportFields.initialText || '', '【検査・処置内容】', reportFields.procedureText || '', '【術後経過】', reportFields.postText || ''].join('\n');
-      const ctx = getMeasureContext(fontPx, fontFamily);
-      const wrapped = wrapTextByMeasure(combined, bw, ctx);
-      const visible = clampLines(wrapped, maxLines);
-
-      // Build tspans; first line bold label if present
-      const parts: string[] = [];
-      visible.forEach((ln, idx) => {
-        if (idx === 0) parts.push(`<tspan x="${bx}" dy="0" font-weight="700">${escapeXml(ln)}</tspan>`);
-        else parts.push(`<tspan x="${bx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`);
-      });
-
-      svgParts.push(`  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`);
-    }
-  } else if (currentPage === 2) {
-    // Page 2: use PAGE2 text cfg boxes
-    const textCfg = LAYOUT.PAGE2.TEXT as any;
-    const bodyProc = textCfg.FREE_TEXT_PROCEDURE;
-    const bodyPost = textCfg.FREE_TEXT_POSTOP;
-
-    const renderBlock = (cfg: any, content: string) => {
-      if (!cfg) return;
-      const bx = slideOffsetX + cfg.x * pxPerCm;
-      const by = slideOffsetY + cfg.y * pxPerCm;
-      const bw = cfg.w * pxPerCm;
-      const bh = cfg.h * pxPerCm;
-      const fontPt = LAYOUT.FONTS.BODY_BASE;
-      const fontPx = ptToPx(fontPt);
-      const fontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
-      const lineHeight = fontPx * 1.15;
-      const maxLines = Math.max(1, Math.floor(bh / lineHeight));
-      const raw = content || '';
-      const ctx = getMeasureContext(fontPx, fontFamily);
-      const wrapped = wrapTextByMeasure(raw, bw, ctx);
-      const visible = clampLines(wrapped, maxLines);
-      const parts: string[] = [];
-      visible.forEach((ln, idx) => {
-        if (idx === 0) parts.push(`<tspan x="${bx}" dy="0">${escapeXml(ln)}</tspan>`);
-        else parts.push(`<tspan x="${bx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`);
-      });
-      svgParts.push(`  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`);
-    };
-
-    renderBlock(bodyProc, reportFields.procedureText || '');
-    renderBlock(bodyPost, reportFields.postText || '');
-  }
+  // use shared helper to render all text portions so that SVG and PPTX stay in sync
+  svgParts.push(...buildSvgTextParts(currentPage, reportFields, pxPerCm, slideOffsetX, slideOffsetY));
 
   const svgCode = `
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${fullSlideW} ${fullSlideH}">
@@ -584,119 +389,27 @@ ${svgParts.join('\n')}
 
     const buildSlide = (slide: pptxgen.Slide, pageNum: number, imagesData: ImageData[]) => {
       slide.background = { fill: options.backgroundColor.replace('#', '') };
-      const pageDims = getPageDimensions(pageNum);
-      const pxToInch = (pageDims.maxW / 2.54) / options.containerWidth;
-      const startXInch = pageDims.left / 2.54;
-      const startYInch = pageDims.startY / 2.54;
+        const pageDims = getPageDimensions(pageNum);
+      const pxPerCm = options.containerWidth / LAYOUT.SLIDE.WIDTH_CM;
       const pageDisplayRows = [1, 2, 3, 4].map(r => imagesData.filter(img => img.row === r));
       const { rowResults } = calculateLayoutForAnyPage(pageDisplayRows, pageNum);
       rowResults.forEach(row => {
         row.images.forEach((item: any) => {
+          const itemCmX = item.x / pxPerCm;
+          const itemCmY = item.y / pxPerCm;
           slide.addImage({
             data: item.img.dataUrl,
-            x: startXInch + (item.x * pxToInch),
-            y: startYInch + (item.y * pxToInch),
-            w: item.w * pxToInch,
-            h: item.h * pxToInch,
+            x: cmToInch(pageDims.left + itemCmX),
+            y: cmToInch(pageDims.startY + itemCmY),
+            w: cmToInch(item.w / pxPerCm),
+            h: cmToInch(item.h / pxPerCm),
             rotate: item.img.rotation
           });
         });
       });
 
-      if (pageNum === 1) {
-        const textCfg = LAYOUT.PAGE1.TEXT;
-        // Fixed logo placeholder
-        if (textCfg.LOGO) {
-          slide.addText('ロゴ', {
-            x: textCfg.LOGO.x / 2.54, y: textCfg.LOGO.y / 2.54, w: textCfg.LOGO.w / 2.54, h: textCfg.LOGO.h / 2.54,
-            align: 'center', valign: 'middle', color: '666666', fill: { color: 'F3F4F6' }, fontSize: 10
-          });
-        }
-        // Fixed hospital info
-        if (textCfg.HOSPITAL_INFO) {
-          slide.addText('荻窪ツイン動物病院', {
-            x: textCfg.HOSPITAL_INFO.x / 2.54, y: textCfg.HOSPITAL_INFO.y / 2.54, w: textCfg.HOSPITAL_INFO.w / 2.54, h: textCfg.HOSPITAL_INFO.h / 2.54,
-            fontSize: LAYOUT.FONTS.INFO_NAME
-          });
-        }
-        slide.addText(`報告日：${reportFields.reportDate}`, {
-          x: textCfg.REPORT_DATE.x / 2.54, y: textCfg.REPORT_DATE.y / 2.54, w: textCfg.REPORT_DATE.w / 2.54, h: textCfg.REPORT_DATE.h / 2.54,
-          fontSize: LAYOUT.FONTS.BODY_BASE, align: 'right'
-        });
-        slide.addText('ご紹介患者についてのご報告', {
-          x: textCfg.TITLE.x / 2.54, y: textCfg.TITLE.y / 2.54, w: textCfg.TITLE.w / 2.54, h: textCfg.TITLE.h / 2.54,
-          fontSize: LAYOUT.FONTS.MAIN_TITLE, align: 'center', bold: true
-        });
-        slide.addText(([
-          { text: reportFields.refHospital || '○○動物病院', options: { underline: true } },
-          { text: ' 御中' }
-        ] as any), {
-          x: textCfg.REF_HOSPITAL.x / 2.54, y: textCfg.REF_HOSPITAL.y / 2.54, w: textCfg.REF_HOSPITAL.w / 2.54, h: textCfg.REF_HOSPITAL.h / 2.54,
-          fontSize: LAYOUT.FONTS.INFO_NAME
-        });
-        slide.addText(([
-          { text: reportFields.refDoctor || '△△', options: { underline: true } },
-          { text: ' 先生' }
-        ] as any), {
-          x: textCfg.REF_DOCTOR.x / 2.54, y: textCfg.REF_DOCTOR.y / 2.54, w: textCfg.REF_DOCTOR.w / 2.54, h: textCfg.REF_DOCTOR.h / 2.54,
-          fontSize: LAYOUT.FONTS.INFO_NAME
-        });
-        slide.addText(([
-          { text: '飼い主様：' },
-          { text: reportFields.ownerLastName || '姓', options: { underline: true } },
-          { text: ' 様' }
-        ] as any), {
-          x: textCfg.OWNER_LASTNAME.x / 2.54, y: textCfg.OWNER_LASTNAME.y / 2.54, w: textCfg.OWNER_LASTNAME.w / 2.54, h: textCfg.OWNER_LASTNAME.h / 2.54,
-          fontSize: LAYOUT.FONTS.INFO_NAME
-        });
-        slide.addText(([
-          { text: 'ペット名：' },
-          { text: reportFields.petName || '名前', options: { underline: true } }
-        ] as any), {
-          x: textCfg.PET_NAME.x / 2.54, y: textCfg.PET_NAME.y / 2.54, w: textCfg.PET_NAME.w / 2.54, h: textCfg.PET_NAME.h / 2.54,
-          fontSize: LAYOUT.FONTS.INFO_NAME
-        });
-        slide.addText('【初診時】', {
-          x: textCfg.SECTION_HEADER.x / 2.54, y: textCfg.SECTION_HEADER.y / 2.54, w: textCfg.SECTION_HEADER.w / 2.54, h: textCfg.SECTION_HEADER.h / 2.54,
-          fontSize: LAYOUT.FONTS.SECTION_HEADER, bold: true
-        });
-        slide.addText(`初診日：${reportFields.firstVisitDate || '202X年XX月XX日'}`, {
-          x: textCfg.FIRST_VISIT_DATE.x / 2.54, y: textCfg.FIRST_VISIT_DATE.y / 2.54, w: textCfg.FIRST_VISIT_DATE.w / 2.54, h: textCfg.FIRST_VISIT_DATE.h / 2.54,
-          fontSize: LAYOUT.FONTS.BODY_BASE
-        });
-        slide.addText(`全身麻酔日：${reportFields.anesthesiaDate || '202X年XX月XX日'}`, {
-          x: textCfg.ANESTHESIA_DATE.x / 2.54, y: textCfg.ANESTHESIA_DATE.y / 2.54, w: textCfg.ANESTHESIA_DATE.w / 2.54, h: textCfg.ANESTHESIA_DATE.h / 2.54,
-          fontSize: LAYOUT.FONTS.BODY_BASE
-        });
-        const initialText = reportFields.initialText || "ここに初診時の内容が入ります...";
-        const fitSize = fitTextToBox(initialText, textCfg.FREE_TEXT_INITIAL, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
-        slide.addText(initialText, {
-          x: textCfg.FREE_TEXT_INITIAL.x / 2.54, y: textCfg.FREE_TEXT_INITIAL.y / 2.54, w: textCfg.FREE_TEXT_INITIAL.w / 2.54, h: textCfg.FREE_TEXT_INITIAL.h / 2.54,
-          fontSize: fitSize, align: 'left', valign: 'top', wrap: true
-        });
-      } else if (pageNum === 2) {
-        const textCfg = LAYOUT.PAGE2.TEXT;
-        slide.addText('【検査・処置内容】', {
-          x: textCfg.SECTION_HEADER_PROCEDURE.x / 2.54, y: textCfg.SECTION_HEADER_PROCEDURE.y / 2.54, w: textCfg.SECTION_HEADER_PROCEDURE.w / 2.54, h: textCfg.SECTION_HEADER_PROCEDURE.h / 2.54,
-          fontSize: LAYOUT.FONTS.SECTION_HEADER, bold: true
-        });
-        const procText = reportFields.procedureText || "ここに検査・処置内容が入ります...";
-        const fitSizeProc = fitTextToBox(procText, textCfg.FREE_TEXT_PROCEDURE, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
-        slide.addText(procText, {
-          x: textCfg.FREE_TEXT_PROCEDURE.x / 2.54, y: textCfg.FREE_TEXT_PROCEDURE.y / 2.54, w: textCfg.FREE_TEXT_PROCEDURE.w / 2.54, h: textCfg.FREE_TEXT_PROCEDURE.h / 2.54,
-          fontSize: fitSizeProc, align: 'left', valign: 'top', wrap: true
-        });
-        slide.addText('【術後経過】', {
-          x: textCfg.SECTION_HEADER_POSTOP.x / 2.54, y: textCfg.SECTION_HEADER_POSTOP.y / 2.54, w: textCfg.SECTION_HEADER_POSTOP.w / 2.54, h: textCfg.SECTION_HEADER_POSTOP.h / 2.54,
-          fontSize: LAYOUT.FONTS.SECTION_HEADER, bold: true
-        });
-        const postText = reportFields.postText || "ここに術後経過が入ります...";
-        const fitSizePost = fitTextToBox(postText, textCfg.FREE_TEXT_POSTOP, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
-        slide.addText(postText, {
-          x: textCfg.FREE_TEXT_POSTOP.x / 2.54, y: textCfg.FREE_TEXT_POSTOP.y / 2.54, w: textCfg.FREE_TEXT_POSTOP.w / 2.54, h: textCfg.FREE_TEXT_POSTOP.h / 2.54,
-          fontSize: fitSizePost, align: 'left', valign: 'top', wrap: true
-        });
-      }
+      // delegate all text to shared helper
+      addPptxText(slide, pageNum, reportFields);
     };
 
     [1, 2].forEach(pageNum => {
@@ -805,6 +518,28 @@ const pageConfirmed = pageImages.filter(img => img.row > 0);
                   value={reportFields.anesthesiaDate}
                   onChange={e => setReportFields(v => ({ ...v, anesthesiaDate: e.target.value }))}
                   onBlur={e => setReportFields(v => ({ ...v, anesthesiaDate: normalizeJapaneseDate(e.target.value) }))}
+                />
+              </div>
+              {/* 担当獣医師（新規：プルダウン） */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">担当獣医師</label>
+                <select className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  value={reportFields.attendingVet}
+                  onChange={e => setReportFields(v => ({ ...v, attendingVet: e.target.value }))}
+                >
+                  <option value="">選択してください</option>
+                  <option value="町田">町田</option>
+                  <option value="スタッフA">スタッフA</option>
+                  <option value="スタッフB">スタッフB</option>
+                </select>
+              </div>
+              {/* 主訴（新規：テキスト入力） */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">主訴</label>
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  placeholder="主な症状や主訴"
+                  value={reportFields.chiefComplaint}
+                  onChange={e => setReportFields(v => ({ ...v, chiefComplaint: e.target.value }))}
                 />
               </div>
             </div>

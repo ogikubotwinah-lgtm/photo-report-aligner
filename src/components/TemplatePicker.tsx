@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import TEMPLATES, { TemplateItem } from '../data/templates';
+import { useState, useMemo } from 'react';
+import TEMPLATES, { type TemplateItem } from '../data/templates';
 
 type InsertField = 'initialText' | 'procedureText' | 'postText';
 
