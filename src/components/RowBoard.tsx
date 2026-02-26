@@ -1,215 +1,382 @@
-import React, { useMemo, useRef, useState, useCallback } from "react";
-import { Reorder } from "framer-motion";
+import React, { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  pointerWithin,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { ImageData } from "../types";
 
 type Props = {
   images: ImageData[];
   setImages: React.Dispatch<React.SetStateAction<ImageData[]>>;
-  rows?: number; // 1..N
+  rows?: number;
 };
 
-export default function RowBoard({ images, setImages, rows = 4 }: Props) {
-  const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [overRow, setOverRow] = useState<number | null>(null);
+// ✅ 共通カードUI（SortableItem と DragOverlay で使い回す）
+function ItemContent({ img }: { img: ImageData }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #eee",
+        borderRadius: 10,
+        background: "#fafafa",
+        overflow: "hidden",
+        width: 120,
+        userSelect: "none",
+      }}
+    >
+      <div style={{ padding: 8 }}>
+        <div
+          style={{
+            width: "100%",
+            height: 80,
+            borderRadius: 8,
+            background: "#eaeaea",
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <img
+            src={img.dataUrl}
+            alt={img.name}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              transform: `rotate(${img.rotation ?? 0}deg)`,
+              pointerEvents: "none",
+            }}
+          />
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            marginTop: 6,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {img.name}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  // ✅ 重要：並び順は sort しない（Reorderの結果が壊れる）
+// ✅ ドラッグ可能な個別アイテム
+function SortableItem({ img }: { img: ImageData }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: img.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.3 : 1,
+        cursor: "grab",
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      <ItemContent img={img} />
+    </div>
+  );
+}
+
+// ✅ 段落コンテナ（droppable + sortable context）
+function RowContainer({ row, images }: { row: number; images: ImageData[] }) {
+  const ids = images.map((img) => img.id);
+  const { setNodeRef, isOver } = useDroppable({ id: `row-${row}` });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        border: isOver ? "2px solid #3b82f6" : "1px solid #ddd",
+        borderRadius: 12,
+        padding: 12,
+        background: isOver ? "#eff6ff" : "#fff",
+        transition: "all 0.12s ease",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontWeight: 700 }}>段落 {row}</div>
+        <div style={{ fontSize: 12, opacity: 0.7 }}>{images.length} 枚</div>
+      </div>
+      <SortableContext items={ids} strategy={rectSortingStrategy}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            minHeight: 92,
+          }}
+        >
+          {images.map((img) => (
+            <SortableItem key={img.id} img={img} />
+          ))}
+        </div>
+      </SortableContext>
+    </div>
+  );
+}
+
+export default function RowBoard({ images, setImages, rows = 4 }: Props) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  // ✅ onDragOver でクロスコンテナ移動済みか追跡し、onDragEnd の二重移動を防ぐ
+  const crossContainerOccurred = useRef(false);
+  // ✅ ドラッグ中アイテムの現在行（stale closure 回避のため ref で管理）
+  const activeItemRowRef = useRef<number | null>(null);
+  // ✅ 空段落の追跡（collisionDetection が参照、byRow の useMemo 内で更新）
+  const emptyRowsRef = useRef<Set<number>>(new Set());
+  // ✅ onDragOver の重複呼び出し抑制
+  const lastMoveRef = useRef<{ activeId: string; overId: string; targetRow: number } | null>(null);
+  const lastMoveTsRef = useRef<number>(0);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  // ✅ 衝突検出：アイテム優先戦略
+  //   アイテム上          → アイテム ID を返す（SortableContext が transform を計算 → スライドアニメ）
+  //   コンテナ内の隙間    → 最近傍アイテム ID（closestCenter）
+  //   空コンテナ上        → コンテナ ID（段落間移動のトリガー）
+  //   コンテナ外          → closestCenter フォールバック
+  const collisionDetection = useCallback(
+    (args: Parameters<typeof closestCenter>[0]) => {
+      const pointerHits = pointerWithin(args);
+      const itemHits = pointerHits.filter(({ id }) => !String(id).startsWith("row-"));
+
+      if (itemHits.length > 0) {
+        // アイテム上：アイテムのみを対象に closestCenter
+        return closestCenter({
+          ...args,
+          droppableContainers: args.droppableContainers.filter(
+            (c) => !String(c.id).startsWith("row-")
+          ),
+        });
+      }
+
+      const containerHits = pointerHits.filter(({ id }) => String(id).startsWith("row-"));
+      if (containerHits.length > 0) {
+        const rowNum = parseInt(String(containerHits[0].id).replace("row-", ""), 10);
+        if (emptyRowsRef.current.has(rowNum)) {
+          // 空コンテナ：コンテナ ID を返して段落間移動を検出
+          return containerHits;
+        }
+        // 非空コンテナの隙間：最近傍アイテム ID を返す
+        const itemContainers = args.droppableContainers.filter(
+          (c) => !String(c.id).startsWith("row-")
+        );
+        if (itemContainers.length > 0) {
+          return closestCenter({ ...args, droppableContainers: itemContainers });
+        }
+      }
+
+      return closestCenter(args);
+    },
+    [] // emptyRowsRef は ref なので deps 不要
+  );
+
   const byRow = useMemo(() => {
     const map = new Map<number, ImageData[]>();
-    for (let r = 0; r <= rows; r++) map.set(r, []);
+    for (let r = 1; r <= rows; r++) map.set(r, []);
     for (const img of images) {
       const r = img.row ?? 0;
-      if (!map.has(r)) map.set(r, []);
-      map.get(r)!.push(img);
+      if (r >= 1 && r <= rows) {
+        map.get(r)!.push(img);
+      }
     }
     return map;
   }, [images, rows]);
 
-  // ✅ 段落内：id順で並び替え
-  const reorderWithinRowByIds = useCallback(
-    (row: number, orderedIds: string[]) => {
+  // ✅ 空段落を副作用で更新（useMemo 内の副作用を排除）
+  useEffect(() => {
+    const emptyRows = new Set<number>();
+    for (let r = 1; r <= rows; r++) {
+      if ((byRow.get(r) ?? []).length === 0) emptyRows.add(r);
+    }
+    emptyRowsRef.current = emptyRows;
+  }, [byRow, rows]);
+
+  const activeImage = useMemo(
+    () => (activeId ? images.find((img) => img.id === activeId) ?? null : null),
+    [activeId, images]
+  );
+
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const id = String(event.active.id);
+      setActiveId(id);
+      crossContainerOccurred.current = false;
+      const img = images.find((x) => x.id === id);
+      activeItemRowRef.current = img?.row ?? null;
+      lastMoveRef.current = null;
+      lastMoveTsRef.current = 0;
+    },
+    [images]
+  );
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { active, over } = event;
+      if (!over) return;
+
+      const activeIdStr = String(active.id);
+      const overId = String(over.id);
+
+      // ターゲット段落を特定
+      let targetRow: number;
+      if (overId.startsWith("row-")) {
+        targetRow = parseInt(overId.replace("row-", ""), 10);
+      } else {
+        // 別アイテムの上にいる場合、そのアイテムの段落を使う
+        const overImg = images.find((img) => img.id === overId);
+        if (!overImg) return;
+        targetRow = overImg.row ?? 0;
+      }
+
+      // 同じ段落なら何もしない（onDragEnd の arrayMove に任せる）
+      if (activeItemRowRef.current === targetRow) return;
+
+      // 直前と完全に同一の操作（activeId / overId / targetRow がすべて一致）は重複スキップ
+      const last = lastMoveRef.current;
+      if (
+        last &&
+        last.activeId === activeIdStr &&
+        last.overId === overId &&
+        last.targetRow === targetRow
+      ) return;
+
+      // 簡易スロットリング：前回の setState から 30ms 未満の連続更新を無視
+      const now = Date.now();
+      if (now - lastMoveTsRef.current < 30) return;
+
+      // ✅ クロスコンテナ移動を実行
+      lastMoveRef.current = { activeId: activeIdStr, overId, targetRow };
+      lastMoveTsRef.current = now;
+      crossContainerOccurred.current = true;
+      activeItemRowRef.current = targetRow;
+
       setImages((prev) => {
-        const rowItems = prev.filter((p) => (p.row ?? 0) === row);
-        const others = prev.filter((p) => (p.row ?? 0) !== row);
+  const idx = prev.findIndex((img) => img.id === activeIdStr);
+  if (idx === -1) return prev;
 
-        const byId = new Map(rowItems.map((x) => [x.id, x]));
-        const nextRow: ImageData[] = [];
+  // すでに同じ段落なら更新しない
+  if (prev[idx].row === targetRow) return prev;
 
-        for (const id of orderedIds) {
-          const item = byId.get(id);
-          if (item) nextRow.push(item);
-        }
-        // 念のため漏れがあれば末尾に
-        for (const item of rowItems) {
-          if (!orderedIds.includes(item.id)) nextRow.push(item);
-        }
+  // 元の updated ロジック
+  const result = [...prev];
+  result[idx] = { ...result[idx], row: targetRow };
 
-        return [...others, ...nextRow];
-      });
+  console.log("[DND_OVER]", {
+    activeId: activeIdStr,
+    overId,
+    targetRow,
+    beforeCount: prev.length,
+    afterCount: result.length,
+    moved: result.find((i) => i.id === activeIdStr),
+  });
+
+  return result;
+});
+    },
+    [images, setImages]
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      setActiveId(null);
+      activeItemRowRef.current = null;
+
+      // クロスコンテナ移動が発生済みなら二重移動を防いで終了
+      if (!over || crossContainerOccurred.current) {
+        crossContainerOccurred.current = false;
+        return;
+      }
+      crossContainerOccurred.current = false;
+
+      const activeIdStr = String(active.id);
+      const overId = String(over.id);
+
+      // コンテナ上へのドロップ（空エリアへのドロップ）は並び替え不要
+      if (overId.startsWith("row-") || activeIdStr === overId) return;
+
+      // ✅ 同段落内の並び替え
+      setImages((prev) => {
+  const activeImg = prev.find((img) => img.id === activeIdStr);
+  const overImg = prev.find((img) => img.id === overId);
+  if (!activeImg || !overImg) return prev;
+  if ((activeImg.row ?? 0) !== (overImg.row ?? 0)) return prev;
+
+  const row = activeImg.row ?? 0;
+  const rowItems = prev.filter((img) => (img.row ?? 0) === row);
+  const others = prev.filter((img) => (img.row ?? 0) !== row);
+  const ids = rowItems.map((img) => img.id);
+  const oldIndex = ids.indexOf(activeIdStr);
+  const newIndex = ids.indexOf(overId);
+  if (oldIndex === -1 || newIndex === -1) return prev;
+
+  const result = [...others, ...arrayMove(rowItems, oldIndex, newIndex)];
+
+  console.log("[DND_END]", {
+    kind: "same-row-reorder",
+    activeId: activeIdStr,
+    overId,
+    beforeCount: prev.length,
+    afterCount: result.length,
+    moved: result.find((i) => i.id === activeIdStr),
+  });
+
+  return result;
+});
     },
     [setImages]
   );
 
-  // ✅ 別段落へ移動
-  const moveToRow = useCallback(
-    (imageId: string, toRow: number) => {
-      setImages((prev) =>
-        prev.map((img) =>
-          img.id === imageId ? { ...img, row: toRow, orderConfirmed: false } : img
-        )
-      );
-    },
-    [setImages]
-  );
+  const handleDragCancel = useCallback(() => {
+    setActiveId(null);
+    activeItemRowRef.current = null;
+    crossContainerOccurred.current = false;
+    lastMoveRef.current = null;
+    lastMoveTsRef.current = 0;
+  }, []);
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      {Array.from({ length: rows + 1 }, (_, i) => i).map((row) => {
-        const list = byRow.get(row) ?? [];
-        const title = row === 0 ? "未割当" : `段落 ${row}`;
-        const orderedIds = list.map((x) => x.id);
-
-        return (
-          <div
-            key={row}
-            ref={(el) => {
-              rowRefs.current[row] = el;
-            }}
-            // ✅ 段落移動（HTML Drag&Drop）用
-            onDragEnter={() => {
-              if (!draggingId) return;
-              setOverRow(row);
-            }}
-            onDragOver={(e) => {
-              // ✅ ここが超重要：drop可能にするため必ず preventDefault
-              if (!draggingId) return;
-              e.preventDefault();
-              setOverRow(row);
-            }}
-            onDragLeave={() => {
-              if (overRow === row) setOverRow(null);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const id = e.dataTransfer.getData("text/plain");
-              if (id) moveToRow(id, row);
-              setDraggingId(null);
-              setOverRow(null);
-            }}
-            style={{
-              border: overRow === row && draggingId ? "2px solid #3b82f6" : "1px solid #ddd",
-              borderRadius: 12,
-              padding: 12,
-              background: overRow === row && draggingId ? "#eff6ff" : "#fff",
-              transition: "all 0.12s ease",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <div style={{ fontWeight: 700 }}>{title}</div>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>{list.length} 枚</div>
-            </div>
-
-            {/* ✅ 段落内並び替え（Reorder） */}
-            <Reorder.Group
-              axis="x"
-              values={orderedIds}
-              onReorder={(newIds) => reorderWithinRowByIds(row, newIds)}
-              style={{
-                display: "flex",
-                gap: 10,
-                paddingTop: 10,
-                flexWrap: "wrap",
-                minHeight: 92,
-              }}
-            >
-              {list.map((img) => (
-                <Reorder.Item
-                  key={img.id}
-                  value={img.id}
-                  style={{ width: 120, userSelect: "none" }}
-                  whileDrag={{ scale: 1.03 }}
-                >
-                  <div
-                    style={{
-                      border: "1px solid #eee",
-                      borderRadius: 10,
-                      background: "#fafafa",
-                      overflow: "hidden",
-                    }}
-                    title="カード本体：同じ段落内の並び替え"
-                  >
-                    {/* ✅ 段落移動用ハンドル（ここだけ draggable） */}
-                    <div
-                      draggable
-                      onPointerDownCapture={(e) => e.stopPropagation()} // ✅ Reorderに触らせない
-                      onMouseDownCapture={(e) => e.stopPropagation()}   // ✅ 同上（Windows対策）
-                      onDragStart={(e) => {
-                        e.stopPropagation(); // ✅ これも効く
-                        setDraggingId(img.id);
-                        e.dataTransfer.setData("text/plain", img.id);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      onDragEnd={() => {
-                        setDraggingId(null);
-                        setOverRow(null);
-                      }}
-                      style={{
-                        padding: "6px 8px",
-                        fontSize: 12,
-                        fontWeight: 700,
-                        background: "#e5e7eb",
-                        cursor: "grab",
-                      }}
-                      title="ここをドラッグすると別段落へ移動"
-                    >
-                      段落移動
-                    </div>
-
-                    {/* ✅ 画像本体（draggable無し＝Reorderが効く） */}
-                    <div style={{ padding: 8 }}>
-                      <div
-                        style={{
-                          width: "100%",
-                          height: 80,
-                          borderRadius: 8,
-                          background: "#eaeaea",
-                          overflow: "hidden",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <img
-                          src={img.dataUrl}
-                          alt={img.name}
-                          style={{
-                            maxWidth: "100%",
-                            maxHeight: "100%",
-                            transform: `rotate(${img.rotation ?? 0}deg)`,
-                            pointerEvents: "none",
-                          }}
-                        />
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: 12,
-                          marginTop: 6,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {img.name}
-                      </div>
-                    </div>
-                  </div>
-                </Reorder.Item>
-              ))}
-            </Reorder.Group>
-          </div>
-        );
-      })}
-    </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
+      <div style={{ display: "grid", gap: 12 }}>
+        {Array.from({ length: rows }, (_, i) => i + 1).map((row) => (
+          <RowContainer key={row} row={row} images={byRow.get(row) ?? []} />
+        ))}
+      </div>
+      <DragOverlay dropAnimation={null}>
+        {activeImage ? <ItemContent img={activeImage} /> : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
