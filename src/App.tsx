@@ -21,6 +21,12 @@ type AppSuggestions = {
 
 const REPORT_FIELDS_STORAGE_KEY = "photo-report-aligner:reportFields";
 const SERVER_BASE_URL = (import.meta as any).env?.VITE_SERVER_BASE_URL?.trim() || "http://localhost:8787";
+const DOCTOR_SUFFIX = "先生";
+const DEFAULT_CLOSING_MESSAGE = `添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+
+---
+荻窪ツイン動物病院
+（住所などは今は不要。後で追加）`;
 // Tailwind v4 uses OKLCH-based CSS variables for its default palette.
 // html2canvas may fail when computed styles contain `oklch(...)`.
 // We override palette variables (HEX) only for the PDF export area (#print-area).
@@ -53,12 +59,14 @@ function getInitialReportFields() {
     petName: '',
     firstVisitDate: '',
     anesthesiaDate: '',
+    sedationDate: '',
     attendingVet: '',
     initialText: '',
     procedureText: '',
     postText: '',
     page3Text: '',
     chiefComplaint: '',
+    closingMessageText: DEFAULT_CLOSING_MESSAGE,
   };
 }
 
@@ -313,6 +321,15 @@ const App: React.FC = () => {
       }
 
       const restored = { ...initial, ...saved };
+      if (!restored.sedationDate && restored.anesthesiaDate) {
+        restored.sedationDate = restored.anesthesiaDate;
+      }
+      if (!restored.anesthesiaDate && restored.sedationDate) {
+        restored.anesthesiaDate = restored.sedationDate;
+      }
+      if (!restored.closingMessageText) {
+        restored.closingMessageText = DEFAULT_CLOSING_MESSAGE;
+      }
       setReportFields(restored);
       setRefHospitalInput(String(restored.refHospitalName || restored.refHospital || ""));
     } catch {
@@ -748,18 +765,16 @@ ${svgParts.join('\n')}
     const pet = (reportFields.petName || '').trim();
     const hospital = (reportFields.refHospitalName || reportFields.refHospital || '').trim();
     const doctor = (reportFields.refDoctor || '').trim();
+    const doctorWithSuffix = doctor ? `${doctor} ${DOCTOR_SUFFIX}` : DOCTOR_SUFFIX;
     const vet = (reportFields.attendingVet || '').trim();
+    const closingMessage = (reportFields.closingMessageText || '').trim() || DEFAULT_CLOSING_MESSAGE;
 
     const subject = `治療報告書（${owner}様 ${pet}ちゃん）`;
     const body = `${hospital} 御中
-${doctor} 先生
+  ${doctorWithSuffix}
 
 いつもお世話になっております。荻窪ツイン動物病院の${vet}です。
-添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
-
----
-荻窪ツイン動物病院
-（住所などは今は不要。後で追加）`;
+  ${closingMessage}`;
 
     setIsCreatingDraft(true);
     try {
@@ -1063,12 +1078,15 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">全身麻酔日</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">鎮静日</label>
                 <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="202X年XX月XX日"
-                  value={reportFields.anesthesiaDate}
-                  onChange={e => setReportFields(v => ({ ...v, anesthesiaDate: e.target.value }))}
-                  onBlur={e => setReportFields(v => ({ ...v, anesthesiaDate: normalizeJapaneseDate(e.target.value) }))}
+                  value={reportFields.sedationDate || reportFields.anesthesiaDate}
+                  onChange={e => setReportFields(v => ({ ...v, sedationDate: e.target.value, anesthesiaDate: e.target.value }))}
+                  onBlur={e => {
+                    const normalized = normalizeJapaneseDate(e.target.value);
+                    setReportFields(v => ({ ...v, sedationDate: normalized, anesthesiaDate: normalized }));
+                  }}
                 />
               </div>
               {/* 担当獣医師（新規：プルダウン） */}
@@ -1173,6 +1191,14 @@ ${doctor} 先生
                   />
                 </div>
               )}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">メール締め文</label>
+                <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  placeholder="メール本文の締めメッセージ"
+                  value={reportFields.closingMessageText || ''}
+                  onChange={e => setReportFields(v => ({ ...v, closingMessageText: e.target.value }))}
+                />
+              </div>
             </div>
             {/* テンプレートピッカー */}
             <TemplatePicker
