@@ -4,3 +4,61 @@
 svg text {
 	font-family: Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif;
 }
+
+@media print {
+	@page {
+		size: A4 portrait;
+		margin: 0;
+	}
+
+	html,
+	body {
+		margin: 0;
+		padding: 0;
+	}
+
+	body > :not(#print-area) {
+		display: none !important;
+	}
+
+	#print-area {
+		display: block !important;
+		position: static !important;
+		width: 210mm !important;
+		height: auto !important;
+		margin: 0 !important;
+		padding: 0 !important;
+		overflow: hidden !important;
+		background: #fff !important;
+	}
+
+	.print-page {
+		width: 210mm !important;
+		height: 297mm !important;
+		margin: 0 !important;
+		padding: 0 !important;
+		border: 0;
+		box-shadow: none;
+		overflow: hidden !important;
+		page-break-inside: avoid;
+		break-inside: avoid-page;
+		page-break-after: always;
+		break-after: page;
+	}
+
+	.print-page:last-child {
+		page-break-after: auto;
+		break-after: auto;
+	}
+
+	.print-page svg {
+		display: block !important;
+		width: 210mm !important;
+		height: 297mm !important;
+	}
+
+	* {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+	}
+}

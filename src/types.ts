@@ -22,6 +22,7 @@ export interface LayoutOptions {
 export interface ReportFields {
   reportDate: string;
   refHospital: string;
+  refHospitalEmail: string;
   refDoctor: string;
   ownerLastName: string;
   petName: string;
@@ -31,5 +32,6 @@ export interface ReportFields {
   initialText: string;
   procedureText: string;
   postText: string;
+  page3Text: string;
   chiefComplaint: string; // 新規：主訴
 }

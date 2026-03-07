@@ -1,0 +1,1006 @@
+﻿diff --git a/src/reportTextRenderer.ts b/src/reportTextRenderer.ts
+index 165408f..2bbe319 100644
+--- a/src/reportTextRenderer.ts
++++ b/src/reportTextRenderer.ts
+@@ -1,6 +1,48 @@
+ import pptxgen from 'pptxgenjs';
+ import { LAYOUT } from './layout';
+ import type { ReportFields } from './types';
++import logoDataUrl from './assets/logo.png?inline';
++import { cmToInch } from './utils/units';
++import { getStampUrlByVetName } from './stamps';
++
++const INTRO_LINE_SPACING_MULTIPLE = 1.25;
++const INITIAL_BLOCK_LINE_GAP_CM = 0.45;
++const INITIAL_BLOCK_AFTER_BODY_GAP_LINES = 2;
++
++function getPage1InitialBlockLayout(textCfg: any) {
++  const subjectCfg = textCfg.FIXED_CLOSING_TEXT;
++  const sectionHeaderCfg = textCfg.SECTION_HEADER;
++  const bodyCfg = textCfg.FREE_TEXT_INITIAL;
++  const imagesHeaderCfg = textCfg.IMAGES_HEADER;
++
++  const fallbackSectionY = sectionHeaderCfg?.y ?? 0;
++  const fallbackBodyY = bodyCfg?.y ?? 0;
++  const fallbackImagesHeaderY = imagesHeaderCfg?.y ?? 0;
++  const bodyHeight = bodyCfg?.h ?? 0;
++
++  if (!subjectCfg) {
++    return {
++      sectionHeaderY: fallbackSectionY,
++      bodyY: fallbackBodyY,
++      imagesHeaderY: fallbackImagesHeaderY,
++    };
++  }
++
++  const subjectBottomY = subjectCfg.y + subjectCfg.h;
++  const sectionHeaderY = subjectBottomY + INITIAL_BLOCK_LINE_GAP_CM;
++  const bodyY = sectionHeaderY + INITIAL_BLOCK_LINE_GAP_CM;
++  const imagesHeaderY =
++    bodyY + bodyHeight + INITIAL_BLOCK_LINE_GAP_CM * INITIAL_BLOCK_AFTER_BODY_GAP_LINES;
++
++  return { sectionHeaderY, bodyY, imagesHeaderY };
++}
++
++
++// 蛹ｻ逋よュ蝣ｱ繝悶Ο繝・け蟾ｦ遶ｯ縺ｯ繝ｬ繧､繧｢繧ｦ繝郁ｨｭ螳壼・縺ｮ HOSPITAL_INFO.x 繧剃ｽｿ縺・◆繧・+// 逶ｴ謗･螳夂ｾｩ縺ｯ荳崎ｦ√・+
++
++
+ 
+ // --- general helpers --------------------------------------------------------
+ 
+@@ -43,6 +85,19 @@ const ptToPx = (pt: number) => pt * (96 / 72);
+ const isJapaneseChar = (ch: string) =>
+   /[\u3000-\u30FF\u4E00-\u9FFF\uFF01-\uFF60]/.test(ch);
+ 
++const getVetSealChar = (fullName: string) => {
++  if (!fullName) return '蜊ｰ';
++  const surnameMap: Record<string, string> = {
++    '逕ｺ逕ｰ蛛･蜷ｾ': '逕ｰ',
++    '豎滓・鄙秘ｦｬ': '謌・,
++    '逾樒伐迴蟶・: '逕ｰ',
++    '蟆乗棊蠏ｩ': '譫・,
++    '驥醍伐荳・ｵｷ': '逕ｰ'
++  };
++  if (surnameMap[fullName]) return surnameMap[fullName];
++  return fullName.slice(-1);
++};
++
+ function getMeasureContext(fontPx: number, fontFamily: string) {
+   const canvas = document.createElement('canvas');
+   const ctx = canvas.getContext('2d')!;
+@@ -124,118 +179,195 @@ export function buildSvgTextParts(
+ 
+   if (pageNum === 1) {
+     const textCfg = LAYOUT.PAGE1.TEXT as any;
++    const initialBlockLayout = getPage1InitialBlockLayout(textCfg);
++
++    // 繝ｭ繧ｴ逕ｻ蜒擾ｼ亥崋螳壹し繧､繧ｺ・嗟ayout.ts 縺ｮ w/h 繧偵◎縺ｮ縺ｾ縺ｾ菴ｿ縺・ｼ・+// 繝ｭ繧ｴ逕ｻ蜒擾ｼ亥崋螳壼ｺｧ讓呻ｼ・崋螳壹し繧､繧ｺ・嗟ayout.ts 縺ｮ x/y/w/h 繧偵◎縺ｮ縺ｾ縺ｾ菴ｿ縺・ｼ・+// 窶ｻ PPTX 縺ｨ蜷後§菫晞匱・・/h 縺檎┌縺・・0 縺ｮ譎ゅ・螳滓ｸｬ蛟､縺ｫ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ・・+if (textCfg.LOGO) {
++  const wCm =
++    typeof textCfg.LOGO.w === 'number' && textCfg.LOGO.w > 0 ? textCfg.LOGO.w : 1.45;
++  const hCm =
++    typeof textCfg.LOGO.h === 'number' && textCfg.LOGO.h > 0 ? textCfg.LOGO.h : 1.26;
++
++  const lx = slideOffsetX + textCfg.LOGO.x * pxPerCm;
++  const ly = slideOffsetY + textCfg.LOGO.y * pxPerCm;
++  const lw = wCm * pxPerCm;
++  const lh = hCm * pxPerCm;
++
++  svgParts.push(
++    `  <image x="${lx}" y="${ly}" width="${lw}" height="${lh}" href="${logoDataUrl}" xlink:href="${logoDataUrl}" />`
++  );
++}
+ 
+-    // logo box placeholder
+-    if (textCfg.LOGO) {
+-      const lx = slideOffsetX + textCfg.LOGO.x * pxPerCm;
+-      const ly = slideOffsetY + textCfg.LOGO.y * pxPerCm;
+-      const lw = textCfg.LOGO.w * pxPerCm;
+-      const lh = textCfg.LOGO.h * pxPerCm;
+-      svgParts.push(
+-        `  <rect x="${lx}" y="${ly}" width="${lw}" height="${lh}" fill="#f3f4f6" stroke="#e5e7eb" />`
+-      );
++    // 蝣ｱ蜻頑律・亥承荳奇ｼ・+    if (textCfg.REPORT_DATE) {
++      const dx = slideOffsetX + textCfg.REPORT_DATE.x * pxPerCm;
++      const dy = slideOffsetY + textCfg.REPORT_DATE.y * pxPerCm;
+       svgParts.push(
+-        `  <text x="${lx + lw / 2}" y="${ly + lh / 2}" font-size="${ptToPx(
+-          10
+-        )}" fill="#666" text-anchor="middle" dominant-baseline="middle">繝ｭ繧ｴ</text>`
++        `  <text x="${dx + textCfg.REPORT_DATE.w * pxPerCm}" y="${dy}" font-size="${ptToPx(
++          LAYOUT.FONTS.REPORT_DATE
++        )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" text-anchor="end">${escapeXml(
++          reportFields.reportDate || ''
++        )}</text>`
+       );
+     }
++// 逞・劼蜷搾ｼ倶ｽ乗園繝｡繝ｼ繝ｫ・亥ｷｦ遶ｯ縺ｯ HOSPITAL_INFO.x 繝励Ο繝代ユ繧｣縺ｫ邨ｱ荳・・+if (textCfg.HOSPITAL_INFO) {
++  const x = slideOffsetX + textCfg.HOSPITAL_INFO.x * pxPerCm;
++  const y = slideOffsetY + textCfg.HOSPITAL_INFO.y * pxPerCm;
++  svgParts.push(
++    `  <text x="${x}" y="${y}" font-size="${ptToPx(LAYOUT.FONTS.INFO_NAME)}" fill="#111" font-family="${svgFontFamily}" dominant-baseline="hanging">闕ｻ遯ｪ繝・う繝ｳ蜍慕黄逞・劼</text>`
++  );
++}
+ 
+-    if (textCfg.HOSPITAL_INFO) {
+-      const hx = slideOffsetX + textCfg.HOSPITAL_INFO.x * pxPerCm;
+-      const hy =
+-        slideOffsetY + (textCfg.HOSPITAL_INFO.y + textCfg.HOSPITAL_INFO.h / 2) *
+-        pxPerCm;
+-      svgParts.push(
+-        `  <text x="${hx}" y="${hy}" font-size="${ptToPx(
+-          LAYOUT.FONTS.INFO_NAME
+-        )}" fill="#111" font-family="${svgFontFamily}" dominant-baseline="hanging">闕ｻ遯ｪ繝・う繝ｳ蜍慕黄逞・劼</text>`
+-      );
+-    }
++if (textCfg.HOSPITAL_ADDR) {
++  const ax = slideOffsetX + textCfg.HOSPITAL_ADDR.x * pxPerCm;
++  const ay = slideOffsetY + textCfg.HOSPITAL_ADDR.y * pxPerCm;
++
++  svgParts.push(
++    `  <text x="${ax}" y="${ay}" font-size="${ptToPx(
++      LAYOUT.FONTS.INFO_DETAIL
++    )}" fill="#111" font-family="${svgFontFamily}" dominant-baseline="hanging">譚ｱ莠ｬ驛ｽ譚我ｸｦ蛹ｺ荳願砂1-23-18</text>`
++  );
++}
+ 
+-    // 1) Title
++if (textCfg.HOSPITAL_EMAIL) {
++  const ex = slideOffsetX + textCfg.HOSPITAL_EMAIL.x * pxPerCm;
++  const ey = slideOffsetY + textCfg.HOSPITAL_EMAIL.y * pxPerCm;
++
++  svgParts.push(
++    `  <text x="${ex}" y="${ey}" font-size="${ptToPx(
++      LAYOUT.FONTS.INFO_DETAIL
++    )}" fill="#111" font-family="${svgFontFamily}" dominant-baseline="hanging">ogikubotwinah@gmail.com</text>`
++  );
++}
++
++    // 1) Title・井ｸｭ螟ｮ蟇・○・・     const titleX = slideOffsetX + textCfg.TITLE.x * pxPerCm;
+     const titleY = slideOffsetY + textCfg.TITLE.y * pxPerCm;
++    const titleW = textCfg.TITLE.w * pxPerCm;
+     svgParts.push(
+-      `  <text x="${titleX}" y="${titleY}" font-size="${ptToPx(
++      `  <text x="${titleX + titleW / 2}" y="${titleY}" font-size="${ptToPx(
+         LAYOUT.FONTS.MAIN_TITLE
+-      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
++      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" text-anchor="middle" font-weight="bold">${escapeXml(
+         '縺皮ｴｹ莉区ぅ閠・↓縺､縺・※縺ｮ縺泌ｱ蜻・
+       )}</text>`
+     );
+ 
+-    // 2) 邏ｹ莉狗羅髯｢ + 蜈育函蜷阪ｒ蜷後§陦鯉ｼ域ｨｪ荳ｦ縺ｳ・・+    // 2) 邏ｹ莉狗羅髯｢ + 蜈育函蜷・(1陦後・3.5pt HGP譏取悃B) with individual underlines
+     const refHospX = slideOffsetX + textCfg.REF_HOSPITAL.x * pxPerCm;
+     const refHospY = slideOffsetY + textCfg.REF_HOSPITAL.y * pxPerCm;
+-    const hospitality = (reportFields.refHospital || '笳銀雷蜍慕黄逞・劼') + '縲' + (reportFields.refDoctor || '笆ｳ笆ｳ') + ' 蜈育函';
++    const hospName = reportFields.refHospital || '笳銀雷蜍慕黄逞・劼';
++    const docName = reportFields.refDoctor || '笆ｳ笆ｳ';
+     svgParts.push(
+       `  <text x="${refHospX}" y="${refHospY}" font-size="${ptToPx(
+-        LAYOUT.FONTS.INFO_NAME
+-      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
+-        hospitality
+-      )}</text>`
++        13.5
++      )}" fill="#000" font-family="HGP譏取悃B" dominant-baseline="hanging" text-anchor="start" >` +
++        `<tspan text-decoration="underline">${escapeXml(hospName)}</tspan>` +
++        `<tspan>縲</tspan>` +
++        `<tspan text-decoration="underline">${escapeXml(docName)}</tspan>` +
++        `<tspan> 蜈育函</tspan>` +
++      `</text>`
+     );
+ 
+-    // 3) Owner & Pet names
+-    const ownerX = slideOffsetX + textCfg.OWNER_LASTNAME.x * pxPerCm;
+-    const ownerY = slideOffsetY + textCfg.OWNER_LASTNAME.y * pxPerCm;
+-    svgParts.push(
+-      `  <text x="${ownerX}" y="${ownerY}" font-size="${ptToPx(
+-        LAYOUT.FONTS.INFO_NAME
+-      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
+-        '鬟ｼ縺・ｸｻ讒假ｼ・ + (reportFields.ownerLastName || '') + ' 讒・
+-      )}</text>`
+-    );
++    // 3) 諡・ｽ鍋坤蛹ｻ蟶ｫ・医Λ繝吶Ν・句錐蜑堺ｸ狗ｷ夲ｼ・+    if (reportFields.attendingVet) {
++      if (textCfg.ATTENDING_VET_LABEL) {
++        const vetLabelX = slideOffsetX + textCfg.ATTENDING_VET_LABEL.x * pxPerCm;
++        const vetLabelY = slideOffsetY + textCfg.ATTENDING_VET_LABEL.y * pxPerCm;
++        svgParts.push(
++          `  <text x="${vetLabelX}" y="${vetLabelY}" font-size="${ptToPx(
++            11
++          )}" fill="#000" font-family="HGP譏取悃B" dominant-baseline="hanging">諡・ｽ鍋坤蛹ｻ蟶ｫ・・/text>`
++        );
++      }
++      if (textCfg.ATTENDING_VET_NAME) {
++        const vetNameX = slideOffsetX + textCfg.ATTENDING_VET_NAME.x * pxPerCm;
++        const vetNameY = slideOffsetY + textCfg.ATTENDING_VET_NAME.y * pxPerCm;
++        svgParts.push(
++          `  <text x="${vetNameX}" y="${vetNameY}" font-size="${ptToPx(
++            11
++          )}" fill="#000" font-family="HGP譏取悃B" dominant-baseline="hanging">${escapeXml(
++            reportFields.attendingVet
++          )}</text>`
++        );
++        if (textCfg.ATTENDING_VET_LINE) {
++          const lineX = slideOffsetX + textCfg.ATTENDING_VET_LINE.x * pxPerCm;
++          const lineY = slideOffsetY + textCfg.ATTENDING_VET_LINE.y * pxPerCm;
++          const lineW = textCfg.ATTENDING_VET_LINE.w * pxPerCm;
++          svgParts.push(
++            `  <line x1="${lineX}" y1="${lineY}" x2="${lineX + lineW}" y2="${lineY}" stroke="#000" stroke-width="${ptToPx(0.5)}" />`
++          );
++        }
++      }
++      // 蜊ｰ髑代ｒ1cm隗呈棧莉倥″譁・ｭ励〒謠上￥
++      if (textCfg.SEAL) {
++        const sealChar = getVetSealChar(reportFields.attendingVet || '');
++        const stampUrl = getStampUrlByVetName(reportFields.attendingVet || '');
++        const sx = slideOffsetX + textCfg.SEAL.x * pxPerCm;
++        const sy = slideOffsetY + textCfg.SEAL.y * pxPerCm;
++        const sw = textCfg.SEAL.w * pxPerCm;
++        const sh = textCfg.SEAL.h * pxPerCm;
++
++        if (stampUrl) {
++          const stampHref = escapeXml(stampUrl);
++          svgParts.push(
++            `  <image x="${sx}" y="${sy}" width="${sw}" height="${sh}" href="${stampHref}" xlink:href="${stampHref}" preserveAspectRatio="xMidYMid meet" />`
++          );
++        }
+ 
+-    const petX = slideOffsetX + textCfg.PET_NAME.x * pxPerCm;
+-    const petY = slideOffsetY + textCfg.PET_NAME.y * pxPerCm;
+-    svgParts.push(
+-      `  <text x="${petX}" y="${petY}" font-size="${ptToPx(
+-        LAYOUT.FONTS.INFO_NAME
+-      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
+-        '繝壹ャ繝亥錐・・ + (reportFields.petName || '')
+-      )}</text>`
+-    );
++        svgParts.push(
++          `  <rect x="${sx}" y="${sy}" width="${sw}" height="${sh}" fill="none" stroke="#000" stroke-width="${ptToPx(0.5)}"/>`
++        );
+ 
+-    // 4) 諡・ｽ鍋坤蛹ｻ蟶ｫ
+-    if (textCfg.ATTENDING_VET && reportFields.attendingVet) {
+-      const vetX = slideOffsetX + textCfg.ATTENDING_VET.x * pxPerCm;
+-      const vetY = slideOffsetY + textCfg.ATTENDING_VET.y * pxPerCm;
+-      svgParts.push(
+-        `  <text x="${vetX}" y="${vetY}" font-size="${ptToPx(
+-          LAYOUT.FONTS.INFO_NAME
+-        )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
+-          '諡・ｽ鍋坤蛹ｻ蟶ｫ・・ + reportFields.attendingVet
+-        )}</text>`
+-      );
++        if (!stampUrl) {
++          svgParts.push(
++            `  <text x="${sx + sw / 2}" y="${sy + sh / 2}" font-size="${ptToPx(18)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="middle" text-anchor="middle" font-weight="bold">${escapeXml(
++              sealChar
++            )}</text>`
++          );
++        }
++      }
+     }
+ 
+-    // 5) 螳壼梛譁・蔵
++    // 4) 螳壼梛譁・蔵・磯｣ｼ縺・ｸｻ蟋薙・繝壹ャ繝亥錐縺ｮ縺ｿ荳狗ｷ夲ｼ・     if (textCfg.FIXED_INTRO_TEXT) {
+-      const introText = `縺薙・蠎ｦ ${reportFields.ownerLastName || '[ 鬟ｼ縺・ｸｻ蟋・]'} 讒倥・ ${reportFields.petName || '[ 繝壹ャ繝亥錐 ]'} 縺｡繧・ｓ繧偵＃邏ｹ莉九＞縺溘□縺阪∪縺励※ 縺ゅｊ縺後→縺・＃縺悶＞縺ｾ縺励◆縲よ享隕九＆縺帙※縺・◆縺縺・◆邨先棡縺ｫ縺､縺阪∪縺励※荳玖ｨ倥・騾壹ｊ縺泌ｱ蜻顔筏縺嶺ｸ翫￡縺ｾ縺吶Ａ;
++      const owner = reportFields.ownerLastName || '[ 鬟ｼ縺・ｸｻ蟋・]';
++      const pet = reportFields.petName || '[ 繝壹ャ繝亥錐 ]';
++      const introLine1 = `縺薙・蠎ｦ ${owner} 讒倥・ ${pet} 縺｡繧・ｓ繧偵＃邏ｹ莉九＞縺溘□縺阪∪縺励※ 縺ゅｊ縺後→縺・＃縺悶＞縺ｾ縺励◆縲Ａ;
++      const introLine2 = '諡晁ｦ九＆縺帙※縺・◆縺縺・◆邨先棡縺ｫ縺､縺阪∪縺励※荳玖ｨ倥・騾壹ｊ縺泌ｱ蜻顔筏縺嶺ｸ翫￡縺ｾ縺吶・;
++      const introText = `${introLine1}\n${introLine2}`;
++
+       const bx = slideOffsetX + textCfg.FIXED_INTRO_TEXT.x * pxPerCm;
+       const by = slideOffsetY + textCfg.FIXED_INTRO_TEXT.y * pxPerCm;
+-      const bw = textCfg.FIXED_INTRO_TEXT.w * pxPerCm;
+-      const bh = textCfg.FIXED_INTRO_TEXT.h * pxPerCm;
+ 
+       const fontPt = LAYOUT.FONTS.BODY_BASE;
+       const fontPx = ptToPx(fontPt);
+-      const lineHeight = fontPx * 1.15;
+-      const maxLines = Math.max(1, Math.floor(bh / lineHeight));
+-
+-      const ctx = getMeasureContext(fontPx, svgFontFamily);
+-      const wrapped = wrapTextByMeasure(introText, bw, ctx);
+-      const visible = clampLines(wrapped, maxLines);
++      const lineHeight = fontPx * INTRO_LINE_SPACING_MULTIPLE;
++      const lines = introText.split('\n');
+ 
+       const parts: string[] = [];
+-      visible.forEach((ln, idx) => {
+-        if (idx === 0) parts.push(`<tspan x="${bx}" dy="0">${escapeXml(ln)}</tspan>`);
+-        else parts.push(`<tspan x="${bx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`);
++      lines.forEach((ln, idx) => {
++        let lineEsc = escapeXml(ln);
++        lineEsc = lineEsc
++          .replace(escapeXml(owner), `<tspan text-decoration="underline">${escapeXml(owner)}</tspan>`)
++          .replace(escapeXml(pet), `<tspan text-decoration="underline">${escapeXml(pet)}</tspan>`);
++        if (idx === 0) parts.push(`<tspan x="${bx}" dy="0">${lineEsc}</tspan>`);
++        else parts.push(
++          `<tspan x="${bx}" dy="${lineHeight}">${lineEsc}</tspan>`
++        );
+       });
+ 
+-      svgParts.push(`  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`);
++      svgParts.push(
++        `  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${parts.join(
++          ''
++        )}</text>`
++      );
+     }
+ 
++    // 5) 蛻晁ｨｺ譌･ / 蜈ｨ霄ｫ鮗ｻ驟疲律 (莠梧ｮｵ陦ｨ遉ｺ)
++
+     // 6) 蛻晁ｨｺ譌･ / 蜈ｨ霄ｫ鮗ｻ驟疲律
+     const firstVisitX = slideOffsetX + textCfg.FIRST_VISIT_DATE.x * pxPerCm;
+     const firstVisitY = slideOffsetY + textCfg.FIRST_VISIT_DATE.y * pxPerCm;
+@@ -259,7 +391,10 @@ export function buildSvgTextParts(
+ 
+     // 7) 螳壼梛譁・贈
+     if (textCfg.FIXED_CLOSING_TEXT) {
+-      const closingText = `縲・{reportFields.chiefComplaint || '[ 荳ｻ險ｴ ]'}縲阪→縺・≧荳ｻ險ｴ縺ｮ轤ｺ縲∵享隕九＞縺溘＠縺ｾ縺励◆縲Ａ;
++      const closingText = `縲・{
++        reportFields.chiefComplaint || '[ 荳ｻ險ｴ ]'
++      }縲阪→縺・≧荳ｻ險ｴ縺ｮ轤ｺ縲∵享隕九＞縺溘＠縺ｾ縺励◆縲Ａ;
++
+       const cx = slideOffsetX + textCfg.FIXED_CLOSING_TEXT.x * pxPerCm;
+       const cy = slideOffsetY + textCfg.FIXED_CLOSING_TEXT.y * pxPerCm;
+       const cw = textCfg.FIXED_CLOSING_TEXT.w * pxPerCm;
+@@ -276,17 +411,48 @@ export function buildSvgTextParts(
+ 
+       const parts: string[] = [];
+       visible.forEach((ln, idx) => {
+-        if (idx === 0) parts.push(`<tspan x="${cx}" dy="0">${escapeXml(ln)}</tspan>`);
+-        else parts.push(`<tspan x="${cx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`);
++        if (idx === 0)
++          parts.push(`<tspan x="${cx}" dy="0">${escapeXml(ln)}</tspan>`);
++        else
++          parts.push(
++            `<tspan x="${cx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`
++          );
+       });
+ 
+-      svgParts.push(`  <text x="${cx}" y="${cy}" font-size="${fontPx}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`);
++      svgParts.push(
++        `  <text x="${cx}" y="${cy}" font-size="${fontPx}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${parts.join(
++          ''
++        )}</text>`
++      );
++    }
++
++    // 蛻・ｊ蜿悶ｊ邱・+    ['CUT_LINE_TOP', 'CUT_LINE_BOTTOM', 'IMAGES_BOTTOM_LINE'].forEach(key => {
++      const cfg = (textCfg as any)[key];
++      if (cfg) {
++        const lx = slideOffsetX + cfg.x * pxPerCm;
++        const ly = slideOffsetY + (cfg.y + cfg.h / 2) * pxPerCm;
++        const lw = cfg.w * pxPerCm;
++        svgParts.push(`  <line x1="${lx}" y1="${ly}" x2="${lx + lw}" y2="${ly}" stroke="#000" stroke-width="${ptToPx(0.5)}" />`);
++      }
++    });
++
++    // 縲瑚ｨ倥・+    if (textCfg.KI) {
++      const kx = slideOffsetX + textCfg.KI.x * pxPerCm;
++      const ky = slideOffsetY + textCfg.KI.y * pxPerCm;
++      const kw = textCfg.KI.w * pxPerCm;
++      svgParts.push(
++        `  <text x="${kx + kw / 2}" y="${ky}" font-size="${ptToPx(
++          LAYOUT.FONTS.KI
++        )}" fill="#000" font-family="HG譏取悃B" dominant-baseline="hanging" text-anchor="middle" font-weight="bold">險・/text>`
++      );
+     }
+ 
+     // 8) Section header 縲仙・險ｺ譎ゅ・     if (textCfg.SECTION_HEADER) {
+       const headerX = slideOffsetX + textCfg.SECTION_HEADER.x * pxPerCm;
+-      const headerY = slideOffsetY + textCfg.SECTION_HEADER.y * pxPerCm;
++      const headerY = slideOffsetY + initialBlockLayout.sectionHeaderY * pxPerCm;
+       svgParts.push(
+         `  <text x="${headerX}" y="${headerY}" font-size="${ptToPx(
+           LAYOUT.FONTS.SECTION_HEADER
+@@ -294,74 +460,101 @@ export function buildSvgTextParts(
+       );
+     }
+ 
++    // 蛻晁ｨｺ譎よ悽譁・+    const bodyCfg2 = textCfg.FREE_TEXT_INITIAL;
++    if (bodyCfg2 && reportFields.initialText) {
++      const bx2 = slideOffsetX + bodyCfg2.x * pxPerCm;
++      const by2 = slideOffsetY + initialBlockLayout.bodyY * pxPerCm;
++      const bw2 = bodyCfg2.w * pxPerCm;
++      const bh2 = bodyCfg2.h * pxPerCm;
++
++      const fontPt2 = LAYOUT.FONTS.BODY_BASE;
++      const fontPx2 = ptToPx(fontPt2);
++      const lineHeight2 = fontPx2 * 1.15;
++      const maxLines2 = Math.max(1, Math.floor(bh2 / lineHeight2));
++
++      const ctx2 = getMeasureContext(fontPx2, svgFontFamily);
++      const wrapped2 = wrapTextByMeasure(reportFields.initialText, bw2, ctx2);
++      const visible2 = clampLines(wrapped2, maxLines2);
++
++      const parts2: string[] = [];
++      visible2.forEach((ln, idx) => {
++        if (idx === 0)
++          parts2.push(`<tspan x="${bx2}" dy="0">${escapeXml(ln)}</tspan>`);
++        else
++          parts2.push(
++            `<tspan x="${bx2}" dy="${lineHeight2}">${escapeXml(ln)}</tspan>`
++          );
++      });
++
++      svgParts.push(
++        `  <text x="${bx2}" y="${by2}" font-size="${fontPx2}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${parts2.join(
++          ''
++        )}</text>`
++      );
++    }
++
+     // 9) Images header 縲仙・險ｺ譎ゅ・閧臥愍蜀咏悄遲峨・     if (textCfg.IMAGES_HEADER) {
+       const imgHeaderX = slideOffsetX + textCfg.IMAGES_HEADER.x * pxPerCm;
+-      const imgHeaderY = slideOffsetY + textCfg.IMAGES_HEADER.y * pxPerCm;
++      const imgHeaderY = slideOffsetY + initialBlockLayout.imagesHeaderY * pxPerCm;
+       svgParts.push(
+         `  <text x="${imgHeaderX}" y="${imgHeaderY}" font-size="${ptToPx(
+           LAYOUT.FONTS.SECTION_HEADER
+         )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">縲仙・險ｺ譎ゅ・閧臥愍蜀咏悄遲峨・/text>`
+       );
+     }
+-
+-    // 蛻晁ｨｺ譎よ悽譁・-    const bodyCfg = textCfg.FREE_TEXT_INITIAL;
+-    if (bodyCfg && reportFields.initialText) {
+-      const bx = slideOffsetX + bodyCfg.x * pxPerCm;
+-      const by = slideOffsetY + bodyCfg.y * pxPerCm;
+-      const bw = bodyCfg.w * pxPerCm;
+-      const bh = bodyCfg.h * pxPerCm;
+-
+-      const fontPt = LAYOUT.FONTS.BODY_BASE;
+-      const fontPx = ptToPx(fontPt);
+-      const lineHeight = fontPx * 1.15;
+-      const maxLines = Math.max(1, Math.floor(bh / lineHeight));
+-
+-      const ctx = getMeasureContext(fontPx, svgFontFamily);
+-      const wrapped = wrapTextByMeasure(reportFields.initialText, bw, ctx);
+-      const visible = clampLines(wrapped, maxLines);
+-
+-      const parts: string[] = [];
+-      visible.forEach((ln, idx) => {
+-        if (idx === 0) parts.push(`<tspan x="${bx}" dy="0">${escapeXml(ln)}</tspan>`);
+-        else parts.push(`<tspan x="${bx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`);
+-      });
+-
+-      svgParts.push(`  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`);
+-    }
+   } else if (pageNum === 2) {
+     const textCfg = LAYOUT.PAGE2.TEXT as any;
++
+     const renderBlock = (cfg: any, content: string) => {
+       if (!cfg) return;
++
+       const bx = slideOffsetX + cfg.x * pxPerCm;
+       const by = slideOffsetY + cfg.y * pxPerCm;
+       const bw = cfg.w * pxPerCm;
+       const bh = cfg.h * pxPerCm;
++
+       const fontPt = LAYOUT.FONTS.BODY_BASE;
+       const fontPx = ptToPx(fontPt);
+       const fontFamily = svgFontFamily;
+       const lineHeight = fontPx * 1.15;
+       const maxLines = Math.max(1, Math.floor(bh / lineHeight));
++
+       const raw = content || '';
+       const ctx = getMeasureContext(fontPx, fontFamily);
+       const wrapped = wrapTextByMeasure(raw, bw, ctx);
+       const visible = clampLines(wrapped, maxLines);
++
+       const parts: string[] = [];
+       visible.forEach((ln, idx) => {
+-        if (idx === 0) parts.push(`<tspan x="${bx}" dy="0">${escapeXml(ln)}</tspan>`);
+-        else parts.push(`<tspan x="${bx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`);
++        if (idx === 0)
++          parts.push(`<tspan x="${bx}" dy="0">${escapeXml(ln)}</tspan>`);
++        else
++          parts.push(
++            `<tspan x="${bx}" dy="${lineHeight}">${escapeXml(ln)}</tspan>`
++          );
+       });
+-      svgParts.push(`  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`);
++
++      svgParts.push(
++        `  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join(
++          ''
++        )}</text>`
++      );
+     };
+ 
+-    renderBlock(textCfg.FREE_TEXT_PROCEDURE, formatSection('讀懈渊繝ｻ蜃ｦ鄂ｮ蜀・ｮｹ', reportFields.procedureText || ''));
+-    renderBlock(textCfg.FREE_TEXT_POSTOP, formatSection('陦灘ｾ檎ｵ碁℃', reportFields.postText || ''));
++    renderBlock(
++      textCfg.FREE_TEXT_PROCEDURE,
++      formatSection('讀懈渊繝ｻ蜃ｦ鄂ｮ蜀・ｮｹ', reportFields.procedureText || '')
++    );
++    renderBlock(
++      textCfg.FREE_TEXT_POSTOP,
++      formatSection('陦灘ｾ檎ｵ碁℃', reportFields.postText || '')
++    );
+   }
+ 
+   return svgParts;
+ }
+-
+ // --- PPTX text -------------------------------------------------------------
+ 
+ export function addPptxText(
+@@ -371,155 +564,275 @@ export function addPptxText(
+ ) {
+   if (pageNum === 1) {
+     const textCfg = LAYOUT.PAGE1.TEXT as any;
++    const initialBlockLayout = getPage1InitialBlockLayout(textCfg);
++
++    // logo image・亥崋螳壼ｺｧ讓呻ｼ・崋螳壹し繧､繧ｺ・嗟ayout.ts 縺ｮ x/y/w/h 繧偵◎縺ｮ縺ｾ縺ｾ菴ｿ縺・ｼ・+// 繝ｭ繧ｴ逕ｻ蜒擾ｼ亥崋螳壼ｺｧ讓呻ｼ・崋螳壹し繧､繧ｺ・・+if (textCfg.LOGO) {
++  slide.addImage({
++    data: logoDataUrl,
++    x: cmToInch(textCfg.LOGO.x),
++    y: cmToInch(textCfg.LOGO.y),
++    w: cmToInch(textCfg.LOGO.w),
++    h: cmToInch(textCfg.LOGO.h),
++  });
++}
+ 
+-    // logo placeholder
+-    if (textCfg.LOGO) {
+-      slide.addText('繝ｭ繧ｴ', {
+-        x: textCfg.LOGO.x / 2.54,
+-        y: textCfg.LOGO.y / 2.54,
+-        w: textCfg.LOGO.w / 2.54,
+-        h: textCfg.LOGO.h / 2.54,
+-        align: 'center',
+-        valign: 'middle',
+-        color: '666666',
+-        fill: { color: 'F3F4F6' },
+-        fontSize: 10,
+-      });
+-    }
+-
+-    // hospital info
+-    if (textCfg.HOSPITAL_INFO) {
+-      slide.addText('闕ｻ遯ｪ繝・う繝ｳ蜍慕黄逞・劼', {
+-        x: textCfg.HOSPITAL_INFO.x / 2.54,
+-        y: textCfg.HOSPITAL_INFO.y / 2.54,
+-        w: textCfg.HOSPITAL_INFO.w / 2.54,
+-        h: textCfg.HOSPITAL_INFO.h / 2.54,
+-        fontSize: LAYOUT.FONTS.INFO_NAME,
++    // 蝣ｱ蜻頑律・亥承荳奇ｼ・+    if (textCfg.REPORT_DATE) {
++      slide.addText(reportFields.reportDate || '', {
++        x: cmToInch(textCfg.REPORT_DATE.x),
++        y: cmToInch(textCfg.REPORT_DATE.y),
++        w: cmToInch(textCfg.REPORT_DATE.w),
++        h: cmToInch(textCfg.REPORT_DATE.h),
++        fontSize: LAYOUT.FONTS.REPORT_DATE,
++        align: 'right'
+       });
+     }
++    
++    // hospital information block left edge already computed above
++    // (shared constant used instead of redeclaring)
++
++    // hospital info・育羅髯｢蜷阪・菴乗園繝ｻ繝｡繝ｼ繝ｫ・・+// 逞・劼蜷・+if (textCfg.HOSPITAL_INFO) {
++  slide.addText('闕ｻ遯ｪ繝・う繝ｳ蜍慕黄逞・劼', {
++    x: cmToInch(textCfg.HOSPITAL_INFO.x),
++    y: cmToInch(textCfg.HOSPITAL_INFO.y),
++    w: cmToInch(textCfg.HOSPITAL_INFO.w),
++    h: cmToInch(textCfg.HOSPITAL_INFO.h),
++    fontSize: LAYOUT.FONTS.INFO_NAME
++  });
++}
++// 菴乗園
++if (textCfg.HOSPITAL_ADDR) {
++  slide.addText('譚ｱ莠ｬ驛ｽ譚我ｸｦ蛹ｺ荳願砂1-23-18', {
++    x: cmToInch(textCfg.HOSPITAL_ADDR.x),
++    y: cmToInch(textCfg.HOSPITAL_ADDR.y),
++    w: cmToInch(textCfg.HOSPITAL_ADDR.w),
++    h: cmToInch(textCfg.HOSPITAL_ADDR.h),
++    fontSize: LAYOUT.FONTS.INFO_DETAIL
++  });
++}
++// 繝｡繝ｼ繝ｫ
++if (textCfg.HOSPITAL_EMAIL) {
++  slide.addText('ogikubotwinah@gmail.com', {
++    x: cmToInch(textCfg.HOSPITAL_EMAIL.x),
++    y: cmToInch(textCfg.HOSPITAL_EMAIL.y),
++    w: cmToInch(textCfg.HOSPITAL_EMAIL.w),
++    h: cmToInch(textCfg.HOSPITAL_EMAIL.h),
++    fontSize: LAYOUT.FONTS.INFO_DETAIL
++  });
++}
+ 
+-    // 1) Title
++    // 1) Title (荳ｭ螟ｮ謠・∴)
+     slide.addText('縺皮ｴｹ莉区ぅ閠・↓縺､縺・※縺ｮ縺泌ｱ蜻・, {
+-      x: textCfg.TITLE.x / 2.54,
+-      y: textCfg.TITLE.y / 2.54,
+-      w: textCfg.TITLE.w / 2.54,
+-      h: textCfg.TITLE.h / 2.54,
++      x: cmToInch(textCfg.TITLE.x),
++      y: cmToInch(textCfg.TITLE.y),
++      w: cmToInch(textCfg.TITLE.w),
++      h: cmToInch(textCfg.TITLE.h),
+       fontSize: LAYOUT.FONTS.MAIN_TITLE,
+       bold: true,
++      align: 'center',
++      fontFace: 'HGP蜑ｵ闍ｱ繝励Ξ繧ｼ繝ｳ繧ｹEB'
+     });
+ 
+-    // 2) 邏ｹ莉狗羅髯｢ + 蜈育函蜷阪ｒ蜷後§陦鯉ｼ域ｨｪ荳ｦ縺ｳ・・-    const hospitality = (reportFields.refHospital || '笳銀雷蜍慕黄逞・劼') + '縲' + (reportFields.refDoctor || '笆ｳ笆ｳ') + ' 蜈育函';
+-    slide.addText(hospitality, {
+-      x: textCfg.REF_HOSPITAL.x / 2.54,
+-      y: textCfg.REF_HOSPITAL.y / 2.54,
+-      w: textCfg.REF_HOSPITAL.w / 2.54,
+-      h: textCfg.REF_HOSPITAL.h / 2.54,
+-      fontSize: LAYOUT.FONTS.INFO_NAME,
+-    });
+-
+-    // 3) Owner & Pet names
++    // 2) 邏ｹ莉狗羅髯｢ + 蜈育函蜷阪ｒ蜷後§陦鯉ｼ・陦悟崋螳壹・3.5pt HGP譏取悃B・我ｸ狗ｷ壹・縺昴ｌ縺槭ｌ
++    const hospName2 = reportFields.refHospital || '笳銀雷蜍慕黄逞・劼';
++    const docName2 = reportFields.refDoctor || '笆ｳ笆ｳ';
+     slide.addText([
+-      { text: '鬟ｼ縺・ｸｻ讒假ｼ・ },
+-      { text: reportFields.ownerLastName || '蟋・, options: { underline: true } },
+-      { text: ' 讒・ }
++      { text: hospName2, options: { underline: true } },
++      { text: '縲' },
++      { text: docName2, options: { underline: true } },
++      { text: ' 蜈育函' }
+     ] as any, {
+-      x: textCfg.OWNER_LASTNAME.x / 2.54,
+-      y: textCfg.OWNER_LASTNAME.y / 2.54,
+-      w: textCfg.OWNER_LASTNAME.w / 2.54,
+-      h: textCfg.OWNER_LASTNAME.h / 2.54,
+-      fontSize: LAYOUT.FONTS.INFO_NAME,
++      x: cmToInch(textCfg.REF_HOSPITAL.x),
++      y: cmToInch(textCfg.REF_HOSPITAL.y),
++      w: cmToInch(textCfg.REF_HOSPITAL.w),
++      h: cmToInch(textCfg.REF_HOSPITAL.h),
++      fontSize: 13.5,
++      fontFace: 'HGP譏取悃B',
++      wrap: false
+     });
+-    slide.addText([
+-      { text: '繝壹ャ繝亥錐・・ },
+-      { text: reportFields.petName || '蜷榊燕', options: { underline: true } }
+-    ] as any, {
+-      x: textCfg.PET_NAME.x / 2.54,
+-      y: textCfg.PET_NAME.y / 2.54,
+-      w: textCfg.PET_NAME.w / 2.54,
+-      h: textCfg.PET_NAME.h / 2.54,
+-      fontSize: LAYOUT.FONTS.INFO_NAME,
++
++    // 4) 諡・ｽ鍋坤蛹ｻ蟶ｫ・医Λ繝吶Ν・句錐蜑堺ｸ狗ｷ夲ｼ句魂髑托ｼ・+// 諡・ｽ鍋坤蛹ｻ蟶ｫ・医Λ繝吶Ν・・+if (textCfg.ATTENDING_VET_LABEL) {
++  slide.addText('諡・ｽ鍋坤蛹ｻ蟶ｫ・・, {
++    x: cmToInch(textCfg.ATTENDING_VET_LABEL.x),
++    y: cmToInch(textCfg.ATTENDING_VET_LABEL.y),
++    w: cmToInch(textCfg.ATTENDING_VET_LABEL.w),
++    h: cmToInch(textCfg.ATTENDING_VET_LABEL.h),
++    fontSize: 11,
++    fontFace: 'HGP譏取悃B',
++    valign: 'top'
++  });
++}
++
++// 諡・ｽ鍋坤蛹ｻ蟶ｫ・亥錐蜑搾ｼ会ｼ九後Λ繝吶Ν邨らｫｯ縲懷魂髑第焔蜑阪堺ｸ狗ｷ夲ｼ・ect縺ｧ謠冗判・・+if (textCfg.ATTENDING_VET_NAME) {
++  // 蜷榊燕繝・く繧ｹ繝茨ｼ井ｽ咲ｽｮ縺ｯ螟峨∴縺ｪ縺・ｼ・+  slide.addText(
++    [{ text: reportFields.attendingVet || '' }] as any,
++    {
++      x: cmToInch(textCfg.ATTENDING_VET_NAME.x),
++      y: cmToInch(textCfg.ATTENDING_VET_NAME.y),
++      w: cmToInch(textCfg.ATTENDING_VET_NAME.w),
++      h: cmToInch(textCfg.ATTENDING_VET_NAME.h),
++      fontSize: 11,
++      fontFace: 'HGP譏取悃B',
++      valign: 'top'
++    } as any
++  );
++
++  // 荳狗ｷ夲ｼ・ect・・.5pt逶ｸ蠖難ｼ・+  if (textCfg.ATTENDING_VET_LINE) {
++    slide.addShape('line' as any, {
++      x: cmToInch(textCfg.ATTENDING_VET_LINE.x),
++      y: cmToInch(textCfg.ATTENDING_VET_LINE.y),
++      w: cmToInch(textCfg.ATTENDING_VET_LINE.w),
++      h: 0,
++      line: { color: '000000', pt: 0.5 }
+     });
++  }
++}
++// 蜊ｰ髑托ｼ・cm隗偵・蝗ｺ螳壻ｽ咲ｽｮ・・+if (textCfg.SEAL) {
++  const sealChar = getVetSealChar(reportFields.attendingVet || '');
++  const stampUrl = getStampUrlByVetName(reportFields.attendingVet || '');
++  const sealX = cmToInch(textCfg.SEAL.x);
++  const sealY = cmToInch(textCfg.SEAL.y);
++  const sealW = cmToInch(textCfg.SEAL.w);
++  const sealH = cmToInch(textCfg.SEAL.h);
++
++  if (stampUrl) {
++    slide.addImage({
++      data: stampUrl,
++      x: sealX,
++      y: sealY,
++      w: sealW,
++      h: sealH,
++      sizing: {
++        type: 'contain',
++        x: sealX,
++        y: sealY,
++        w: sealW,
++        h: sealH,
++      } as any,
++    } as any);
++  } else {
++    slide.addText(sealChar, {
++      x: sealX,
++      y: sealY,
++      w: sealW,
++      h: sealH,
++      fontSize: 18,
++      align: 'center',
++      valign: 'middle',
++      bold: true,
++    });
++  }
+ 
+-    // 4) 諡・ｽ鍋坤蛹ｻ蟶ｫ
+-    if (textCfg.ATTENDING_VET && reportFields.attendingVet) {
+-      slide.addText('諡・ｽ鍋坤蛹ｻ蟶ｫ・・ + reportFields.attendingVet, {
+-        x: textCfg.ATTENDING_VET.x / 2.54,
+-        y: textCfg.ATTENDING_VET.y / 2.54,
+-        w: textCfg.ATTENDING_VET.w / 2.54,
+-        h: textCfg.ATTENDING_VET.h / 2.54,
+-        fontSize: LAYOUT.FONTS.INFO_NAME,
+-      });
+-    }
++  slide.addShape('rect' as any, {
++    x: sealX,
++    y: sealY,
++    w: sealW,
++    h: sealH,
++    line: { color: '000000', pt: 0.5 },
++    fill: { color: 'FFFFFF', transparency: 100 } as any,
++  });
++}
+ 
+-    // 5) 螳壼梛譁・蔵
+     if (textCfg.FIXED_INTRO_TEXT) {
+-      const introText = `縺薙・蠎ｦ ${reportFields.ownerLastName || '[ 鬟ｼ縺・ｸｻ蟋・]'} 讒倥・ ${reportFields.petName || '[ 繝壹ャ繝亥錐 ]'} 縺｡繧・ｓ繧偵＃邏ｹ莉九＞縺溘□縺阪∪縺励※ 縺ゅｊ縺後→縺・＃縺悶＞縺ｾ縺励◆縲よ享隕九＆縺帙※縺・◆縺縺・◆邨先棡縺ｫ縺､縺阪∪縺励※荳玖ｨ倥・騾壹ｊ縺泌ｱ蜻顔筏縺嶺ｸ翫￡縺ｾ縺吶Ａ;
+-      const fitSize = fitTextToBox(introText, textCfg.FIXED_INTRO_TEXT, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+-      slide.addText(introText, {
+-        x: textCfg.FIXED_INTRO_TEXT.x / 2.54,
+-        y: textCfg.FIXED_INTRO_TEXT.y / 2.54,
+-        w: textCfg.FIXED_INTRO_TEXT.w / 2.54,
+-        h: textCfg.FIXED_INTRO_TEXT.h / 2.54,
+-        fontSize: fitSize,
+-        valign: 'top',
+-        wrap: true,
+-      });
+-    }
+-
+-    // 6) 蛻晁ｨｺ譌･ / 蜈ｨ霄ｫ鮗ｻ驟疲律
+-    slide.addText(`蛻晁ｨｺ譌･・・{reportFields.firstVisitDate || ''}`, {
+-      x: textCfg.FIRST_VISIT_DATE.x / 2.54,
+-      y: textCfg.FIRST_VISIT_DATE.y / 2.54,
+-      w: textCfg.FIRST_VISIT_DATE.w / 2.54,
+-      h: textCfg.FIRST_VISIT_DATE.h / 2.54,
++  const owner = reportFields.ownerLastName || '[ 鬟ｼ縺・ｸｻ蟋・]';
++  const pet = reportFields.petName || '[ 繝壹ャ繝亥錐 ]';
++      const introLine2 = '諡晁ｦ九＆縺帙※縺・◆縺縺・◆邨先棡縺ｫ縺､縺阪∪縺励※荳玖ｨ倥・騾壹ｊ縺泌ｱ蜻顔筏縺嶺ｸ翫￡縺ｾ縺吶・;
++  slide.addText(
++    [
++      { text: '縺薙・蠎ｦ ' },
++      { text: owner, options: { underline: true } },
++      { text: ' 讒倥・ ' },
++      { text: pet, options: { underline: true } },
++          { text: ' 縺｡繧・ｓ繧偵＃邏ｹ莉九＞縺溘□縺阪∪縺励※ 縺ゅｊ縺後→縺・＃縺悶＞縺ｾ縺励◆縲・n' },
++          { text: introLine2 }
++    ] as any,
++        {
++      x: cmToInch(textCfg.FIXED_INTRO_TEXT.x),
++      y: cmToInch(textCfg.FIXED_INTRO_TEXT.y),
++      w: cmToInch(textCfg.FIXED_INTRO_TEXT.w),
++      h: cmToInch(textCfg.FIXED_INTRO_TEXT.h),
+       fontSize: LAYOUT.FONTS.BODY_BASE,
+-    });
++      valign: 'top',
++          fontFace: 'HG譏取悃B',
++          lineSpacingMultiple: INTRO_LINE_SPACING_MULTIPLE
++        } as any
++  );
++}
+ 
+-    slide.addText(`蜈ｨ霄ｫ鮗ｻ驟疲律・・{reportFields.anesthesiaDate || ''}`, {
+-      x: textCfg.ANESTHESIA_DATE.x / 2.54,
+-      y: textCfg.ANESTHESIA_DATE.y / 2.54,
+-      w: textCfg.ANESTHESIA_DATE.w / 2.54,
+-      h: textCfg.ANESTHESIA_DATE.h / 2.54,
+-      fontSize: LAYOUT.FONTS.BODY_BASE,
+-    });
++    if (textCfg.FIRST_VISIT_DATE) {
++  slide.addText(`蛻晁ｨｺ譌･・・{reportFields.firstVisitDate || ''}`, {
++    x: cmToInch(textCfg.FIRST_VISIT_DATE.x),
++    y: cmToInch(textCfg.FIRST_VISIT_DATE.y),
++    w: cmToInch(textCfg.FIRST_VISIT_DATE.w),
++    h: cmToInch(textCfg.FIRST_VISIT_DATE.h),
++    fontSize: LAYOUT.FONTS.BODY_BASE
++  });
++}
++
++if (textCfg.ANESTHESIA_DATE) {
++  slide.addText(`蜈ｨ霄ｫ鮗ｻ驟疲律・・{reportFields.anesthesiaDate || ''}`, {
++    x: cmToInch(textCfg.ANESTHESIA_DATE.x),
++    y: cmToInch(textCfg.ANESTHESIA_DATE.y),
++    w: cmToInch(textCfg.ANESTHESIA_DATE.w),
++    h: cmToInch(textCfg.ANESTHESIA_DATE.h),
++    fontSize: LAYOUT.FONTS.BODY_BASE
++  });
++}
+ 
+     // 7) 螳壼梛譁・贈
+     if (textCfg.FIXED_CLOSING_TEXT) {
+-      const closingText = `縲・{reportFields.chiefComplaint || '[ 荳ｻ險ｴ ]'}縲阪→縺・≧荳ｻ險ｴ縺ｮ轤ｺ縲∵享隕九＞縺溘＠縺ｾ縺励◆縲Ａ;
+-      const fitSize = fitTextToBox(closingText, textCfg.FIXED_CLOSING_TEXT, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+-      slide.addText(closingText, {
+-        x: textCfg.FIXED_CLOSING_TEXT.x / 2.54,
+-        y: textCfg.FIXED_CLOSING_TEXT.y / 2.54,
+-        w: textCfg.FIXED_CLOSING_TEXT.w / 2.54,
+-        h: textCfg.FIXED_CLOSING_TEXT.h / 2.54,
+-        fontSize: fitSize,
+-        valign: 'top',
+-        wrap: true,
++  const closingText = `縲・{reportFields.chiefComplaint || '[ 荳ｻ險ｴ ]'}縲阪→縺・≧荳ｻ險ｴ縺ｮ轤ｺ縲∵享隕九＞縺溘＠縺ｾ縺励◆縲Ａ;
++  slide.addText(closingText, {
++    x: cmToInch(textCfg.FIXED_CLOSING_TEXT.x),
++    y: cmToInch(textCfg.FIXED_CLOSING_TEXT.y),
++    w: cmToInch(textCfg.FIXED_CLOSING_TEXT.w),
++    h: cmToInch(textCfg.FIXED_CLOSING_TEXT.h),
++    fontSize: LAYOUT.FONTS.BODY_BASE,
++    valign: 'top'
++  });
++}
++
++    // 蛻・ｊ蜿悶ｊ邱壹・逕ｻ蜒丈ｸ狗ｷ・+    ['CUT_LINE_TOP','CUT_LINE_BOTTOM','IMAGES_BOTTOM_LINE'].forEach(key=>{
++      const cfg=(textCfg as any)[key];
++      if(cfg){
++        slide.addShape('line' as any,{
++          x:cmToInch(cfg.x),
++          y:cmToInch(cfg.y + (cfg.h / 2)),
++          w:cmToInch(cfg.w),
++          h:0,
++          line:{ color: '000000', pt: 0.5 }
++        });
++      }
++    });
++
++    // 縲瑚ｨ倥・+    if(textCfg.KI){
++      slide.addText('險・,{
++        x:cmToInch(textCfg.KI.x),y:cmToInch(textCfg.KI.y),w:cmToInch(textCfg.KI.w),h:cmToInch(textCfg.KI.h),
++        fontSize:LAYOUT.FONTS.KI,fontFace:'HG譏取悃B',align:'center'
+       });
+     }
+ 
+     // 8) Section header 縲仙・險ｺ譎ゅ・     if (textCfg.SECTION_HEADER) {
+       slide.addText('縲仙・險ｺ譎ゅ・, {
+-        x: textCfg.SECTION_HEADER.x / 2.54,
+-        y: textCfg.SECTION_HEADER.y / 2.54,
+-        w: textCfg.SECTION_HEADER.w / 2.54,
+-        h: textCfg.SECTION_HEADER.h / 2.54,
++        x: cmToInch(textCfg.SECTION_HEADER.x),
++        y: cmToInch(initialBlockLayout.sectionHeaderY),
++        w: cmToInch(textCfg.SECTION_HEADER.w),
++        h: cmToInch(textCfg.SECTION_HEADER.h),
+         fontSize: LAYOUT.FONTS.SECTION_HEADER,
+-        bold: true,
+-      });
+-    }
+-
+-    // 9) Images header 縲仙・險ｺ譎ゅ・閧臥愍蜀咏悄遲峨・-    if (textCfg.IMAGES_HEADER) {
+-      slide.addText('縲仙・險ｺ譎ゅ・閧臥愍蜀咏悄遲峨・, {
+-        x: textCfg.IMAGES_HEADER.x / 2.54,
+-        y: textCfg.IMAGES_HEADER.y / 2.54,
+-        w: textCfg.IMAGES_HEADER.w / 2.54,
+-        h: textCfg.IMAGES_HEADER.h / 2.54,
+-        fontSize: LAYOUT.FONTS.SECTION_HEADER,
+-        bold: true,
++        bold: true
+       });
+     }
+ 
+@@ -527,60 +840,72 @@ export function addPptxText(
+     if (textCfg.FREE_TEXT_INITIAL && reportFields.initialText) {
+       const fitSize = fitTextToBox(reportFields.initialText, textCfg.FREE_TEXT_INITIAL, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+       slide.addText(reportFields.initialText, {
+-        x: textCfg.FREE_TEXT_INITIAL.x / 2.54,
+-        y: textCfg.FREE_TEXT_INITIAL.y / 2.54,
+-        w: textCfg.FREE_TEXT_INITIAL.w / 2.54,
+-        h: textCfg.FREE_TEXT_INITIAL.h / 2.54,
++        x: cmToInch(textCfg.FREE_TEXT_INITIAL.x),
++        y: cmToInch(initialBlockLayout.bodyY),
++        w: cmToInch(textCfg.FREE_TEXT_INITIAL.w),
++        h: cmToInch(textCfg.FREE_TEXT_INITIAL.h),
+         fontSize: fitSize,
+         valign: 'top',
+-        wrap: true,
++        wrap: true
++      });
++    }
++
++    // 9) Images header 縲仙・險ｺ譎ゅ・閧臥愍蜀咏悄遲峨・+    if (textCfg.IMAGES_HEADER) {
++      slide.addText('縲仙・險ｺ譎ゅ・閧臥愍蜀咏悄遲峨・, {
++        x: cmToInch(textCfg.IMAGES_HEADER.x),
++        y: cmToInch(initialBlockLayout.imagesHeaderY),
++        w: cmToInch(textCfg.IMAGES_HEADER.w),
++        h: cmToInch(textCfg.IMAGES_HEADER.h),
++        fontSize: LAYOUT.FONTS.SECTION_HEADER,
++        bold: true
+       });
+     }
+   } else if (pageNum === 2) {
+     const textCfg = LAYOUT.PAGE2.TEXT as any;
+     if (textCfg.SECTION_HEADER_PROCEDURE) {
+       slide.addText('縲先､懈渊繝ｻ蜃ｦ鄂ｮ蜀・ｮｹ縲・, {
+-        x: textCfg.SECTION_HEADER_PROCEDURE.x / 2.54,
+-        y: textCfg.SECTION_HEADER_PROCEDURE.y / 2.54,
+-        w: textCfg.SECTION_HEADER_PROCEDURE.w / 2.54,
+-        h: textCfg.SECTION_HEADER_PROCEDURE.h / 2.54,
++        x: cmToInch(textCfg.SECTION_HEADER_PROCEDURE.x),
++        y: cmToInch(textCfg.SECTION_HEADER_PROCEDURE.y),
++        w: cmToInch(textCfg.SECTION_HEADER_PROCEDURE.w),
++        h: cmToInch(textCfg.SECTION_HEADER_PROCEDURE.h),
+         fontSize: LAYOUT.FONTS.SECTION_HEADER,
+-        bold: true,
++        bold: true
+       });
+     }
+     const procText = reportFields.procedureText || "縺薙％縺ｫ讀懈渊繝ｻ蜃ｦ鄂ｮ蜀・ｮｹ縺悟・繧翫∪縺・..";
+     const fitSizeProc = fitTextToBox(procText, textCfg.FREE_TEXT_PROCEDURE, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+     slide.addText(procText, {
+-      x: textCfg.FREE_TEXT_PROCEDURE.x / 2.54,
+-      y: textCfg.FREE_TEXT_PROCEDURE.y / 2.54,
+-      w: textCfg.FREE_TEXT_PROCEDURE.w / 2.54,
+-      h: textCfg.FREE_TEXT_PROCEDURE.h / 2.54,
++      x: cmToInch(textCfg.FREE_TEXT_PROCEDURE.x),
++      y: cmToInch(textCfg.FREE_TEXT_PROCEDURE.y),
++      w: cmToInch(textCfg.FREE_TEXT_PROCEDURE.w),
++      h: cmToInch(textCfg.FREE_TEXT_PROCEDURE.h),
+       fontSize: fitSizeProc,
+       align: 'left',
+       valign: 'top',
+-      wrap: true,
++      wrap: true
+     });
+     if (textCfg.SECTION_HEADER_POSTOP) {
+       slide.addText('縲占｡灘ｾ檎ｵ碁℃縲・, {
+-        x: textCfg.SECTION_HEADER_POSTOP.x / 2.54,
+-        y: textCfg.SECTION_HEADER_POSTOP.y / 2.54,
+-        w: textCfg.SECTION_HEADER_POSTOP.w / 2.54,
+-        h: textCfg.SECTION_HEADER_POSTOP.h / 2.54,
++        x: cmToInch(textCfg.SECTION_HEADER_POSTOP.x),
++        y: cmToInch(textCfg.SECTION_HEADER_POSTOP.y),
++        w: cmToInch(textCfg.SECTION_HEADER_POSTOP.w),
++        h: cmToInch(textCfg.SECTION_HEADER_POSTOP.h),
+         fontSize: LAYOUT.FONTS.SECTION_HEADER,
+-        bold: true,
++        bold: true
+       });
+     }
+     const postText = reportFields.postText || "縺薙％縺ｫ陦灘ｾ檎ｵ碁℃縺悟・繧翫∪縺・..";
+     const fitSizePost = fitTextToBox(postText, textCfg.FREE_TEXT_POSTOP, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+     slide.addText(postText, {
+-      x: textCfg.FREE_TEXT_POSTOP.x / 2.54,
+-      y: textCfg.FREE_TEXT_POSTOP.y / 2.54,
+-      w: textCfg.FREE_TEXT_POSTOP.w / 2.54,
+-      h: textCfg.FREE_TEXT_POSTOP.h / 2.54,
++      x: cmToInch(textCfg.FREE_TEXT_POSTOP.x),
++      y: cmToInch(textCfg.FREE_TEXT_POSTOP.y),
++      w: cmToInch(textCfg.FREE_TEXT_POSTOP.w),
++      h: cmToInch(textCfg.FREE_TEXT_POSTOP.h),
+       fontSize: fitSizePost,
+       align: 'left',
+       valign: 'top',
+-      wrap: true,
++      wrap: true
+     });
+   }
+ }

@@ -15,9 +15,12 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@tailwindcss/vite": "^4.2.0",
     "framer-motion": "^12.34.2",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.2",
     "pptxgenjs": "^4.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "svg2pdf.js": "^2.7.0",
     "tailwindcss": "^4.2.0"
   },
   "devDependencies": {
