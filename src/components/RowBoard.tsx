@@ -140,15 +140,10 @@ function RowContainer({ row, images }: { row: number; images: ImageData[] }) {
 
 export default function RowBoard({ images, setImages, rows = 4 }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  // ✅ onDragOver でクロスコンテナ移動済みか追跡し、onDragEnd の二重移動を防ぐ
-  const crossContainerOccurred = useRef(false);
   // ✅ ドラッグ中アイテムの現在行（stale closure 回避のため ref で管理）
   const activeItemRowRef = useRef<number | null>(null);
   // ✅ 空段落の追跡（collisionDetection が参照、byRow の useMemo 内で更新）
   const emptyRowsRef = useRef<Set<number>>(new Set());
-  // ✅ onDragOver の重複呼び出し抑制
-  const lastMoveRef = useRef<{ activeId: string; overId: string; targetRow: number } | null>(null);
-  const lastMoveTsRef = useRef<number>(0);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -225,129 +220,93 @@ export default function RowBoard({ images, setImages, rows = 4 }: Props) {
     (event: DragStartEvent) => {
       const id = String(event.active.id);
       setActiveId(id);
-      crossContainerOccurred.current = false;
       const img = images.find((x) => x.id === id);
       activeItemRowRef.current = img?.row ?? null;
-      lastMoveRef.current = null;
-      lastMoveTsRef.current = 0;
     },
     [images]
   );
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
-      const { active, over } = event;
+      const { over } = event;
       if (!over) return;
 
-      const activeIdStr = String(active.id);
       const overId = String(over.id);
 
       // ターゲット段落を特定
-      let targetRow: number;
+      let targetRow: number | null = null;
       if (overId.startsWith("row-")) {
         targetRow = parseInt(overId.replace("row-", ""), 10);
       } else {
         // 別アイテムの上にいる場合、そのアイテムの段落を使う
         const overImg = images.find((img) => img.id === overId);
         if (!overImg) return;
-        targetRow = overImg.row ?? 0;
+        targetRow = overImg.row ?? null;
       }
+
+      if (!targetRow) return;
 
       // 同じ段落なら何もしない（onDragEnd の arrayMove に任せる）
       if (activeItemRowRef.current === targetRow) return;
 
-      // 直前と完全に同一の操作（activeId / overId / targetRow がすべて一致）は重複スキップ
-      const last = lastMoveRef.current;
-      if (
-        last &&
-        last.activeId === activeIdStr &&
-        last.overId === overId &&
-        last.targetRow === targetRow
-      ) return;
-
-      // 簡易スロットリング：前回の setState から 30ms 未満の連続更新を無視
-      const now = Date.now();
-      if (now - lastMoveTsRef.current < 30) return;
-
-      // ✅ クロスコンテナ移動を実行
-      lastMoveRef.current = { activeId: activeIdStr, overId, targetRow };
-      lastMoveTsRef.current = now;
-      crossContainerOccurred.current = true;
+      // ドロップ候補だけ記録する（state は更新しない）
       activeItemRowRef.current = targetRow;
-
-      setImages((prev) => {
-  const idx = prev.findIndex((img) => img.id === activeIdStr);
-  if (idx === -1) return prev;
-
-  // すでに同じ段落なら更新しない
-  if (prev[idx].row === targetRow) return prev;
-
-  // 元の updated ロジック
-  const result = [...prev];
-  result[idx] = { ...result[idx], row: targetRow };
-
-  console.log("[DND_OVER]", {
-    activeId: activeIdStr,
-    overId,
-    targetRow,
-    beforeCount: prev.length,
-    afterCount: result.length,
-    moved: result.find((i) => i.id === activeIdStr),
-  });
-
-  return result;
-});
     },
-    [images, setImages]
+    [images]
   );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { active, over } = event;
       setActiveId(null);
-      activeItemRowRef.current = null;
-
-      // クロスコンテナ移動が発生済みなら二重移動を防いで終了
-      if (!over || crossContainerOccurred.current) {
-        crossContainerOccurred.current = false;
+      if (!over) {
+        activeItemRowRef.current = null;
         return;
       }
-      crossContainerOccurred.current = false;
 
       const activeIdStr = String(active.id);
       const overId = String(over.id);
 
-      // コンテナ上へのドロップ（空エリアへのドロップ）は並び替え不要
-      if (overId.startsWith("row-") || activeIdStr === overId) return;
-
-      // ✅ 同段落内の並び替え
       setImages((prev) => {
-  const activeImg = prev.find((img) => img.id === activeIdStr);
-  const overImg = prev.find((img) => img.id === overId);
-  if (!activeImg || !overImg) return prev;
-  if ((activeImg.row ?? 0) !== (overImg.row ?? 0)) return prev;
+        const activeIdx = prev.findIndex((img) => img.id === activeIdStr);
+        if (activeIdx === -1) return prev;
 
-  const row = activeImg.row ?? 0;
-  const rowItems = prev.filter((img) => (img.row ?? 0) === row);
-  const others = prev.filter((img) => (img.row ?? 0) !== row);
-  const ids = rowItems.map((img) => img.id);
-  const oldIndex = ids.indexOf(activeIdStr);
-  const newIndex = ids.indexOf(overId);
-  if (oldIndex === -1 || newIndex === -1) return prev;
+        // 段落間移動は onDragEnd でのみ確定
+        const activeRow = prev[activeIdx].row ?? null;
+        let targetRow: number | null = activeItemRowRef.current;
+        if (overId.startsWith("row-")) {
+          targetRow = parseInt(overId.replace("row-", ""), 10);
+        } else {
+          const overImg = prev.find((img) => img.id === overId);
+          if (overImg) targetRow = overImg.row ?? null;
+        }
 
-  const result = [...others, ...arrayMove(rowItems, oldIndex, newIndex)];
+        if (targetRow && activeRow !== targetRow) {
+          const result = [...prev];
+          result[activeIdx] = { ...result[activeIdx], row: targetRow };
+          return result;
+        }
 
-  console.log("[DND_END]", {
-    kind: "same-row-reorder",
-    activeId: activeIdStr,
-    overId,
-    beforeCount: prev.length,
-    afterCount: result.length,
-    moved: result.find((i) => i.id === activeIdStr),
-  });
+        // コンテナ上へのドロップ（空エリアへのドロップ）は並び替え不要
+        if (overId.startsWith("row-") || activeIdStr === overId) return prev;
 
-  return result;
-});
+        // 同段落内の並び替え
+        const activeImg = prev[activeIdx];
+        const overImg = prev.find((img) => img.id === overId);
+        if (!overImg) return prev;
+        if ((activeImg.row ?? 0) !== (overImg.row ?? 0)) return prev;
+
+        const row = activeImg.row ?? 0;
+        const rowItems = prev.filter((img) => (img.row ?? 0) === row);
+        const others = prev.filter((img) => (img.row ?? 0) !== row);
+        const ids = rowItems.map((img) => img.id);
+        const oldIndex = ids.indexOf(activeIdStr);
+        const newIndex = ids.indexOf(overId);
+        if (oldIndex === -1 || newIndex === -1) return prev;
+
+        return [...others, ...arrayMove(rowItems, oldIndex, newIndex)];
+      });
+      activeItemRowRef.current = null;
     },
     [setImages]
   );
@@ -355,9 +314,6 @@ export default function RowBoard({ images, setImages, rows = 4 }: Props) {
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
     activeItemRowRef.current = null;
-    crossContainerOccurred.current = false;
-    lastMoveRef.current = null;
-    lastMoveTsRef.current = 0;
   }, []);
 
   return (
