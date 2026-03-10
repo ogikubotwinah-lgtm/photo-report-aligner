@@ -68,6 +68,14 @@ function buildPage3Body(reportFields: ReportFields, options?: RenderOptions) {
   return postSection;
 }
 
+function getThankYouBody(reportFields: ReportFields) {
+  const thankYouTextType = String((reportFields as any)?.thankYouTextType || 'first-time');
+  if (thankYouTextType === 'existing') {
+    return '平素よりご紹介いただき、誠にありがとうございます。\nご不明な点などございましたら、ご遠慮なくお知らせください。\n今後とも何卒よろしくお願い申し上げます。';
+  }
+  return 'この度は初めてご紹介のご縁を賜り、誠にありがとうございます。\nご不明な点などございましたら、ご遠慮なくお知らせください。\n今後とも何卒よろしくお願い申し上げます。';
+}
+
 function buildPage1DateLines(reportFields: ReportFields) {
   const ordered = [
     { label: '初診日', value: String(reportFields?.firstVisitDate || '') },
@@ -668,7 +676,15 @@ if (textCfg.HOSPITAL_EMAIL) {
       }
 
       const postMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
-      drawBody(bodyPostCfg, currentYcm, reportFields.postText || '', postMaxLines);
+      const postLines = drawBody(bodyPostCfg, currentYcm, reportFields.postText || '', postMaxLines);
+      currentYcm += postLines * lineHeightCm;
+
+      const thankYouBody = getThankYouBody(reportFields);
+      if (thankYouBody) {
+        currentYcm += lineHeightCm;
+        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
+        drawBody(bodyPostCfg, currentYcm, thankYouBody, thanksMaxLines);
+      }
     }
   } else if (pageNum === 3) {
     const lineCfg = (LAYOUT.PAGE3 as any).LINES;
@@ -1173,6 +1189,26 @@ if (textCfg.SEAL) {
           valign: 'top',
           wrap: true
         });
+      }
+      currentYcm += postLines.length * lineHeightCm;
+
+      const thankYouBody = getThankYouBody(reportFields);
+      if (thankYouBody) {
+        currentYcm += lineHeightCm;
+        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
+        const thankYouLines = getVisibleBody(bodyPostCfg, thankYouBody, thanksMaxLines);
+        if (bodyPostCfg && thankYouLines.length > 0) {
+          slide.addText(thankYouLines.join('\n'), {
+            x: cmToInch(bodyPostCfg.x),
+            y: cmToInch(currentYcm),
+            w: cmToInch(bodyPostCfg.w),
+            h: cmToInch(thankYouLines.length * lineHeightCm),
+            fontSize: LAYOUT.FONTS.BODY_BASE,
+            align: 'left',
+            valign: 'top',
+            wrap: true
+          });
+        }
       }
     }
   } else if (pageNum === 3) {
