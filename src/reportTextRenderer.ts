@@ -672,8 +672,8 @@ if (textCfg.HOSPITAL_EMAIL) {
       const fontPt = LAYOUT.FONTS.BODY_BASE;
       const fontPx = ptToPx(fontPt);
       const fontFamily = svgFontFamily;
-      const lineHeight = fontPx * 1.15;
-      const maxLines = Math.max(1, Math.floor(bh / lineHeight));
+      const lineHeightPx = fontPx * 1.15;
+      const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
 
       const ctx = getMeasureContext(fontPx, fontFamily);
       const wrapped = wrapTextByMeasure(page3Body, bw, ctx);
@@ -700,16 +700,13 @@ if (textCfg.HOSPITAL_EMAIL) {
 
         const dyPx = idx === 0
           ? 0
-          : lineHeight + (isFirstPostBodyLine ? postFirstLineExtraDyPx : 0);
+          : lineHeightPx + (isFirstPostBodyLine ? postFirstLineExtraDyPx : 0);
 
         if (isFirstPostBodyLine) {
           shiftedFirstPostLine = true;
         }
 
-        if (idx === 0)
-          parts.push(`<tspan x="${bx}" dy="0">${escapeXml(lineText)}</tspan>`);
-        else
-          parts.push(`<tspan x="${bx}" dy="${dyPx}">${escapeXml(lineText)}</tspan>`);
+        parts.push(`<tspan x="${bx}" dy="${dyPx}">${escapeXml(lineText)}</tspan>`);
       });
 
       svgParts.push(
