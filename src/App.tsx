@@ -21,12 +21,6 @@ type AppSuggestions = {
 
 const REPORT_FIELDS_STORAGE_KEY = "photo-report-aligner:reportFields";
 const SERVER_BASE_URL = (import.meta as any).env?.VITE_SERVER_BASE_URL?.trim() || "http://localhost:8787";
-const DOCTOR_SUFFIX = "先生";
-const DEFAULT_CLOSING_MESSAGE = `添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
-
----
-荻窪ツイン動物病院
-（住所などは今は不要。後で追加）`;
 // Tailwind v4 uses OKLCH-based CSS variables for its default palette.
 // html2canvas may fail when computed styles contain `oklch(...)`.
 // We override palette variables (HEX) only for the PDF export area (#print-area).
@@ -59,14 +53,12 @@ function getInitialReportFields() {
     petName: '',
     firstVisitDate: '',
     anesthesiaDate: '',
-    sedationDate: '',
     attendingVet: '',
     initialText: '',
     procedureText: '',
     postText: '',
     page3Text: '',
     chiefComplaint: '',
-    closingMessageText: DEFAULT_CLOSING_MESSAGE,
   };
 }
 
@@ -102,154 +94,6 @@ function normalizeJapaneseDate(input: string): string {
   }
 
   return s;
-}
-
-function toDateInputValue(value: string): string {
-  const s = String(value || '').trim();
-  if (!s) return '';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-
-  const jp = s.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日$/);
-  if (jp) {
-    const y = jp[1];
-    const m = jp[2].padStart(2, '0');
-    const d = jp[3].padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  const slash = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
-  if (slash) {
-    const y = slash[1];
-    const m = slash[2].padStart(2, '0');
-    const d = slash[3].padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-
-  return '';
-}
-
-function fromDateInputValue(value: string): string {
-  if (!value) return '';
-  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return value;
-  return `${m[1]}年${m[2]}月${m[3]}日`;
-}
-
-function escapeSvgText(value: string): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-const PREVIEW_TEXT_Y_OFFSETS_CM = {
-  initialText: 0,
-  procedureText: 0,
-  postText: 0,
-  page3Text: 0,
-  closingMessage: 0,
-} as const;
-
-type Page2PhotoLabelOption = '' | 'treatment-post' | 'inspection';
-
-type PreviewTextOffsetPx = {
-  initialText: number;
-  procedureText: number;
-  postText: number;
-  page3Text: number;
-  closingMessage: number;
-};
-
-function shiftSvgTextY(part: string, deltaPx: number): string {
-  if (!deltaPx) return part;
-  return part.replace(/ y="([^"]+)"/, (_m, y) => ` y="${Number(y) + deltaPx}"`);
-}
-
-function applyPreviewTextOffsets(pageNum: 1 | 2 | 3, parts: string[], offsets: PreviewTextOffsetPx): string[] {
-  if (pageNum === 1) {
-    let waitingInitialBody = false;
-    return parts.map((part) => {
-      if (part.includes('【初診時】')) {
-        waitingInitialBody = true;
-        return part;
-      }
-      if (waitingInitialBody && part.includes('<tspan') && !part.includes('【')) {
-        waitingInitialBody = false;
-        return shiftSvgTextY(part, offsets.initialText);
-      }
-      if (part.includes('という主訴の為、拝見いたしました。')) {
-        return shiftSvgTextY(part, offsets.closingMessage);
-      }
-      return part;
-    });
-  }
-
-  if (pageNum === 2) {
-    let waitingProcedureBody = false;
-    let waitingPostBody = false;
-    return parts.map((part) => {
-      if (part.includes('【検査・処置内容】')) {
-        waitingProcedureBody = true;
-        return part;
-      }
-      if (part.includes('【術後経過】')) {
-        waitingPostBody = true;
-        return part;
-      }
-      if (waitingProcedureBody && part.includes('<tspan')) {
-        waitingProcedureBody = false;
-        return shiftSvgTextY(part, offsets.procedureText);
-      }
-      if (waitingPostBody && part.includes('<tspan')) {
-        waitingPostBody = false;
-        return shiftSvgTextY(part, offsets.postText);
-      }
-      return part;
-    });
-  }
-
-  let shiftedPage3 = false;
-  return parts.map((part) => {
-    if (!shiftedPage3 && part.includes('<tspan')) {
-      shiftedPage3 = true;
-      return shiftSvgTextY(part, offsets.page3Text);
-    }
-    return part;
-  });
-}
-
-function estimateWrappedLineCount(text: string, maxWidthPx: number, fontPx: number, maxLines: number): number {
-  const source = String(text || '').trim();
-  if (!source) return 1;
-
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return 1;
-  ctx.font = `${fontPx}px Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif`;
-
-  let lines = 0;
-  source.split('\n').forEach((paragraph) => {
-    if (!paragraph) {
-      lines += 1;
-      return;
-    }
-    let current = '';
-    for (const ch of paragraph) {
-      const candidate = current + ch;
-      if (ctx.measureText(candidate).width <= maxWidthPx || current.length === 0) {
-        current = candidate;
-      } else {
-        lines += 1;
-        current = ch;
-      }
-      if (lines >= maxLines) break;
-    }
-    if (lines < maxLines) lines += 1;
-  });
-
-  return Math.min(Math.max(lines, 1), maxLines);
 }
 
 type PageSwitcherProps = {
@@ -327,24 +171,12 @@ const PageSwitcher: React.FC<PageSwitcherProps> = ({
 
 
 const App: React.FC = () => {
-  type DateFieldKey = 'firstVisitDate' | 'sedationDate' | 'anesthesiaDate';
-
   const [showPage3, setShowPage3] = useState(false);
 
   // ページ管理
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   const [reportFieldsHydrated, setReportFieldsHydrated] = useState(false);
-  const [calendarOpenField, setCalendarOpenField] = useState<DateFieldKey | null>(null);
-  const [calendarViewDate, setCalendarViewDate] = useState<Date>(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  });
-  const firstVisitDateInputRef = useRef<HTMLInputElement | null>(null);
-  const sedationDateInputRef = useRef<HTMLInputElement | null>(null);
-  const anesthesiaDateInputRef = useRef<HTMLInputElement | null>(null);
-  const page1CutLineBottomBaseYRef = useRef<number>((LAYOUT.PAGE1.TEXT as any).CUT_LINE_BOTTOM.y);
-  const page1FixedClosingBaseYRef = useRef<number>((LAYOUT.PAGE1.TEXT as any).FIXED_CLOSING_TEXT.y);
 
   // PageSwitcher には常に PAGE1-3 を表示
   const availablePages = useMemo<number[]>(() => [1, 2, 3], []);
@@ -459,51 +291,6 @@ const App: React.FC = () => {
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
-  const page1DateOutputItems = useMemo(() => {
-    return [
-      { label: '初診日', value: String(reportFields.firstVisitDate || '').trim() },
-      { label: '鎮静日', value: String(reportFields.sedationDate || '').trim() },
-      { label: '全身麻酔日', value: String(reportFields.anesthesiaDate || '').trim() },
-    ].filter((item) => item.value !== '');
-  }, [reportFields.firstVisitDate, reportFields.sedationDate, reportFields.anesthesiaDate]);
-
-  const filledDateCount = useMemo(() => {
-    return [
-      reportFields.firstVisitDate,
-      reportFields.sedationDate,
-      reportFields.anesthesiaDate,
-    ].reduce((count, value) => (String(value || '').trim() !== '' ? count + 1 : count), 0);
-  }, [reportFields.firstVisitDate, reportFields.sedationDate, reportFields.anesthesiaDate]);
-
-  useEffect(() => {
-    const page1Text = LAYOUT.PAGE1.TEXT as any;
-    if (filledDateCount === 1) {
-      page1Text.CUT_LINE_BOTTOM.y = 9.35;
-    } else if (filledDateCount === 2) {
-      page1Text.CUT_LINE_BOTTOM.y = 9.79;
-    } else if (filledDateCount === 3) {
-      page1Text.CUT_LINE_BOTTOM.y = 10.2;
-    } else {
-      page1Text.CUT_LINE_BOTTOM.y = page1CutLineBottomBaseYRef.current;
-    }
-
-    page1Text.FIXED_CLOSING_TEXT.y =
-      filledDateCount === 3 ? 10.3 : page1FixedClosingBaseYRef.current;
-
-    return () => {
-      page1Text.CUT_LINE_BOTTOM.y = page1CutLineBottomBaseYRef.current;
-      page1Text.FIXED_CLOSING_TEXT.y = page1FixedClosingBaseYRef.current;
-    };
-  }, [filledDateCount]);
-
-  const getInputToneClass = useCallback(
-    (value: string) => (value.trim() === '' ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'),
-    []
-  );
-  const getTextareaToneClass = useCallback(
-    (value: string) => (value.trim() === '' ? 'border-amber-200 bg-white' : 'border-slate-200 bg-white'),
-    []
-  );
 
   useEffect(() => {
     const initial = getInitialReportFields();
@@ -526,15 +313,6 @@ const App: React.FC = () => {
       }
 
       const restored = { ...initial, ...saved };
-      if (!restored.sedationDate && restored.anesthesiaDate) {
-        restored.sedationDate = restored.anesthesiaDate;
-      }
-      if (!restored.anesthesiaDate && restored.sedationDate) {
-        restored.anesthesiaDate = restored.sedationDate;
-      }
-      if (!restored.closingMessageText) {
-        restored.closingMessageText = DEFAULT_CLOSING_MESSAGE;
-      }
       setReportFields(restored);
       setRefHospitalInput(String(restored.refHospitalName || restored.refHospital || ""));
     } catch {
@@ -560,98 +338,6 @@ const App: React.FC = () => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(REPORT_FIELDS_STORAGE_KEY);
     }
-  }, []);
-
-  const handleEnterToNextField = useCallback((
-    e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>,
-    options?: { targetSelector?: string }
-  ) => {
-    if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
-    e.preventDefault();
-
-    const scope = e.currentTarget.closest('[data-enter-scope="report-fields"]') as HTMLElement | null;
-    const root = scope ?? document.body;
-    if (options?.targetSelector) {
-      const target = root.querySelector<HTMLElement>(options.targetSelector);
-      target?.focus();
-      return;
-    }
-    const fields = Array.from(
-      root.querySelectorAll<HTMLElement>(
-        'input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([disabled]), select:not([disabled])'
-      )
-    ).filter((el) => el.tabIndex !== -1);
-
-    const currentIndex = fields.indexOf(e.currentTarget);
-    if (currentIndex === -1) return;
-
-    const next = fields[currentIndex + 1] as HTMLInputElement | HTMLSelectElement | undefined;
-    next?.focus();
-  }, []);
-
-  const parseStoredDate = useCallback((value: string): Date | null => {
-    const iso = toDateInputValue(value);
-    if (!iso) return null;
-    const [y, m, d] = iso.split('-').map((x) => parseInt(x, 10));
-    if (!y || !m || !d) return null;
-    return new Date(y, m - 1, d);
-  }, []);
-
-  const openDatePicker = useCallback(
-    (key: DateFieldKey, ref: React.RefObject<HTMLInputElement | null>) => {
-      setCalendarOpenField(key);
-      const base = parseStoredDate(reportFields[key]) ?? new Date();
-      setCalendarViewDate(new Date(base.getFullYear(), base.getMonth(), 1));
-      ref.current?.focus();
-    },
-    [parseStoredDate, reportFields]
-  );
-
-  const weekdayLabels = ['日', '月', '火', '水', '木', '金', '土'];
-  const calendarDays = useMemo(() => {
-    const year = calendarViewDate.getFullYear();
-    const month = calendarViewDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const daysInPrevMonth = new Date(year, month, 0).getDate();
-    const cells: Array<{ iso: string; day: number; inMonth: boolean }> = [];
-
-    for (let i = firstDay - 1; i >= 0; i -= 1) {
-      const day = daysInPrevMonth - i;
-      const d = new Date(year, month - 1, day);
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      cells.push({ iso, day, inMonth: false });
-    }
-
-    for (let day = 1; day <= daysInMonth; day += 1) {
-      const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      cells.push({ iso, day, inMonth: true });
-    }
-
-    while (cells.length % 7 !== 0) {
-      const nextDay = cells.length - (firstDay + daysInMonth) + 1;
-      const d = new Date(year, month + 1, nextDay);
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(nextDay).padStart(2, '0')}`;
-      cells.push({ iso, day: nextDay, inMonth: false });
-    }
-
-    return cells;
-  }, [calendarViewDate]);
-
-  const moveCalendarMonth = useCallback((delta: number) => {
-    setCalendarViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
-  }, []);
-
-  const selectCalendarDate = useCallback((field: DateFieldKey, iso: string) => {
-    setReportFields((prev) => ({ ...prev, [field]: fromDateInputValue(iso) }));
-    setCalendarOpenField(null);
-  }, []);
-
-  const handleReportFieldsFocusCapture = useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement | null;
-    if (!target) return;
-    if (target.closest('[data-date-field-root="true"]')) return;
-    setCalendarOpenField(null);
   }, []);
 
   // 現在のページのデータへのエイリアス
@@ -736,42 +422,10 @@ const [page2Confirmed, setPage2Confirmed] = useState(false);
 const [page3Confirmed, setPage3Confirmed] = useState(false);
 
 // ページ順モード（あなたの既存仕様に合わせて）
-  const [pageOrderMode] = useState<"page2-page3" | "page3-page2">("page2-page3");
+const [pageOrderMode, setPageOrderMode] = useState<"page2-page3" | "page3-page2">("page2-page3");
 
 // どこに「経過」を入れるか（既存がこれならOK）
 const [postPlacement, setPostPlacement] = useState<"page2" | "page3">("page2");
-const [isAttendingVetOpen, setIsAttendingVetOpen] = useState(false);
-const [page2PhotoLabel, setPage2PhotoLabel] = useState<Page2PhotoLabelOption>('treatment-post');
-const [isPage2PhotoLabelOpen, setIsPage2PhotoLabelOpen] = useState(false);
-const [isPostPlacementOpen, setIsPostPlacementOpen] = useState(false);
-const attendingVetDropdownRef = useRef<HTMLDivElement | null>(null);
-const page2PhotoLabelDropdownRef = useRef<HTMLDivElement | null>(null);
-const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
-const page2PhotoLabelText = useMemo(() => {
-  if (page2PhotoLabel === 'treatment-post') return '【治療時・治療後写真】';
-  if (page2PhotoLabel === 'inspection') return '【検査時写真】';
-  return '';
-}, [page2PhotoLabel]);
-
-useEffect(() => {
-  const closeIfOutside = (event: Event) => {
-    const target = event.target as Node | null;
-    if (!target) return;
-    if (attendingVetDropdownRef.current?.contains(target)) return;
-    if (page2PhotoLabelDropdownRef.current?.contains(target)) return;
-    if (postPlacementDropdownRef.current?.contains(target)) return;
-    setIsAttendingVetOpen(false);
-    setIsPage2PhotoLabelOpen(false);
-    setIsPostPlacementOpen(false);
-  };
-
-  document.addEventListener('mousedown', closeIfOutside);
-  document.addEventListener('focusin', closeIfOutside);
-  return () => {
-    document.removeEventListener('mousedown', closeIfOutside);
-    document.removeEventListener('focusin', closeIfOutside);
-  };
-}, []);
 
 
 // 出力順（PDF/PPTXの並びなどで使う想定）
@@ -808,49 +462,36 @@ useEffect(() => {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log('handleFileUpload triggered');
-    const input = e.currentTarget;
-    const files = Array.from(input.files || []) as File[];
-    if (!files.length) {
-      input.value = '';
-      return;
-    }
-
-    try {
-      recordHistory();
-      const newImages: ImageData[] = await Promise.all(
-        files.map((file: File) => {
-          return new Promise<ImageData>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-              const dataUrl = event.target?.result as string;
-              const img = new Image();
-              img.onload = () => {
-                resolve({
-                  id: Math.random().toString(36).substr(2, 9),
-                  name: file.name,
-                  dataUrl,
-                  width: img.width,
-                  height: img.height,
-                  mimeType: file.type,
-                  row: 0,
-                  orderConfirmed: false,
-                  rotation: 0
-                });
-              };
-              img.src = dataUrl;
+    const files = Array.from(e.target.files || []) as File[];
+    if (!files.length) return;
+    recordHistory();
+    const newImages: ImageData[] = await Promise.all(
+      files.map((file: File) => {
+        return new Promise<ImageData>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const dataUrl = event.target?.result as string;
+            const img = new Image();
+            img.onload = () => {
+              resolve({
+                id: Math.random().toString(36).substr(2, 9),
+                name: file.name,
+                dataUrl,
+                width: img.width,
+                height: img.height,
+                mimeType: file.type,
+                row: 0,
+                orderConfirmed: false,
+                rotation: 0
+              });
             };
-            reader.readAsDataURL(file);
-          });
-        })
-      );
-      setImages((prev: ImageData[]) => [...prev, ...newImages]);
-      if (currentPage === 1) setPage1Confirmed(false);
-      if (currentPage === 2) setPage2Confirmed(false);
-      if (currentPage === 3) setPage3Confirmed(false);
-    } finally {
-      // 同一ファイル再選択でも onChange が必ず発火するようにリセット
-      input.value = '';
-    }
+            img.src = dataUrl;
+          };
+          reader.readAsDataURL(file);
+        });
+      })
+    );
+    setImages((prev: ImageData[]) => [...prev, ...newImages]);
   };
 
   const rotateImage = (id: string, direction: 'left' | 'right') => {
@@ -987,34 +628,7 @@ useEffect(() => {
     return { xCm: clampedX, yCm, wCm: clampedW, hCm: clampedH };
   }, []);
 
-  const calculateSvgDataForPage = useCallback((pageNum: 1 | 2 | 3, renderTarget: 'preview' | 'export' = 'preview') => {
-    const page1Text = LAYOUT.PAGE1.TEXT as any;
-    const page1Images = LAYOUT.PAGE1.IMAGES as any;
-    const page2Text = LAYOUT.PAGE2.TEXT as any;
-    const page3Text = LAYOUT.PAGE3.TEXT as any;
-    const originalPage1ImageStartY = page1Images.START_Y;
-    const originalPage1FixedClosingY = page1Text.FIXED_CLOSING_TEXT.y;
-    const originalPage2ProcedureHeaderY = page2Text.SECTION_HEADER_PROCEDURE?.y;
-    const originalPage3FreeTextX = page3Text.FREE_TEXT_PAGE3?.x;
-    const originalPage3FreeTextY = page3Text.FREE_TEXT_PAGE3?.y;
-
-    if (pageNum === 1) {
-      const bodyStartYcm = 11.8;
-      const fontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
-      const lineHeightPx = fontPx * 1.15;
-      const page1MaxW = LAYOUT.SLIDE.WIDTH_CM - page1Images.LEFT - page1Images.RIGHT;
-      const pxPerCmForPage1 = options.containerWidth / page1MaxW;
-      const bodyCfg = page1Text.FREE_TEXT_INITIAL;
-      const maxWidthPx = bodyCfg.w * pxPerCmForPage1;
-      const maxLines = Math.max(1, Math.floor((bodyCfg.h * pxPerCmForPage1) / lineHeightPx));
-      const lineCount = estimateWrappedLineCount(reportFields.initialText || '', maxWidthPx, fontPx, maxLines);
-      const lineHeightCm = lineHeightPx / pxPerCmForPage1;
-      const imageHeaderYcm = bodyStartYcm + lineCount * lineHeightCm + lineHeightCm;
-
-      page1Text.FIXED_CLOSING_TEXT.y = 10.3;
-      page1Images.START_Y = imageHeaderYcm + 0.5;
-    }
-
+  const calculateSvgDataForPage = useCallback((pageNum: 1 | 2 | 3) => {
     const pageImages = allPagesImages[pageNum] ?? [];
     const pageConfirmed = pageImages.filter(img => img.row > 0);
     const pageRows = [1, 2, 3, 4].map(r => pageConfirmed.filter(img => img.row === r));
@@ -1070,141 +684,17 @@ useEffect(() => {
       });
     });
 
-    if (pageNum === 2 && rowResults.length > 0 && typeof originalPage2ProcedureHeaderY === 'number') {
-      let imagesBottomCm: number = imgCfg.START_Y;
-      rowResults.forEach((row) => {
-        row.images.forEach((item: any) => {
-          const bottomCm = imgCfg.START_Y + (item.y + item.h) / pxPerCm;
-          if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
-        });
-      });
-
-      const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
-      const oneLineCm = (bodyFontPx * 1.15) / pxPerCm;
-      page2Text.SECTION_HEADER_PROCEDURE.y = imagesBottomCm + oneLineCm;
-    }
-
-    if (pageNum === 3 && showPage3 && postPlacement === 'page3' && page3Text.FREE_TEXT_PAGE3) {
-      if (rowResults.length > 0) {
-        let imagesBottomCm: number = imgCfg.START_Y;
-        rowResults.forEach((row) => {
-          row.images.forEach((item: any) => {
-            const bottomCm = imgCfg.START_Y + (item.y + item.h) / pxPerCm;
-            if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
-          });
-        });
-
-        const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
-        const oneLineCm = (bodyFontPx * 1.15) / pxPerCm;
-        page3Text.FREE_TEXT_PAGE3.y = imagesBottomCm + oneLineCm;
-      } else {
-        page3Text.FREE_TEXT_PAGE3.x = 1.04;
-        page3Text.FREE_TEXT_PAGE3.y = 1.9;
-      }
-    }
-
     // use shared helper to render all text portions so that SVG and PPTX stay in sync
-    const originalCutLineBottomY = page1Text.CUT_LINE_BOTTOM.y;
-    const originalFixedClosingY = page1Text.FIXED_CLOSING_TEXT.y;
-
-    if (pageNum === 1) {
-      if (filledDateCount === 1) {
-        page1Text.CUT_LINE_BOTTOM.y = 9.35;
-      } else if (filledDateCount === 2) {
-        page1Text.CUT_LINE_BOTTOM.y = 9.79;
-      } else if (filledDateCount === 3) {
-        page1Text.CUT_LINE_BOTTOM.y = 10.2;
-      } else {
-        page1Text.CUT_LINE_BOTTOM.y = page1CutLineBottomBaseYRef.current;
-      }
-      page1Text.FIXED_CLOSING_TEXT.y = 10.3;
-    }
-
-    const builtTextParts = buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
+    svgParts.push(...buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
       showPage3,
       postPlacement,
-    });
-
-    const previewOffsetsPx: PreviewTextOffsetPx = {
-      initialText: PREVIEW_TEXT_Y_OFFSETS_CM.initialText * pxPerCm,
-      procedureText: PREVIEW_TEXT_Y_OFFSETS_CM.procedureText * pxPerCm,
-      postText: PREVIEW_TEXT_Y_OFFSETS_CM.postText * pxPerCm,
-      page3Text: PREVIEW_TEXT_Y_OFFSETS_CM.page3Text * pxPerCm,
-      closingMessage: PREVIEW_TEXT_Y_OFFSETS_CM.closingMessage * pxPerCm,
-    };
-    const resolvedTextParts =
-      renderTarget === 'preview'
-        ? applyPreviewTextOffsets(pageNum, builtTextParts, previewOffsetsPx)
-        : builtTextParts;
-
-    if (pageNum === 1) {
-      page1Text.CUT_LINE_BOTTOM.y = originalCutLineBottomY;
-      page1Text.FIXED_CLOSING_TEXT.y = originalFixedClosingY;
-    }
-    if (pageNum === 1) {
-      svgParts.push(
-        ...resolvedTextParts.filter(
-          (part) => !part.includes('初診日：') && !part.includes('鎮静日：') && !part.includes('全身麻酔日：') && !part.includes('【初診時】')
-        )
-      );
-
-      const sectionHeaderX = slideOffsetX + page1Text.SECTION_HEADER.x * pxPerCm;
-      const sectionHeaderY = slideOffsetY + 11.07 * pxPerCm;
-      svgParts.push(
-        `  <text x="${sectionHeaderX}" y="${sectionHeaderY}" font-size="${LAYOUT.FONTS.SECTION_HEADER * (96 / 72)}" fill="#000" font-family="Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif" dominant-baseline="hanging" font-weight="bold">【初診時】</text>`
-      );
-    } else {
-      svgParts.push(...resolvedTextParts);
-      if (pageNum === 2 && page2PhotoLabelText) {
-        const labelX = slideOffsetX + 1.04 * pxPerCm;
-        const labelY = slideOffsetY + 1.9 * pxPerCm;
-        svgParts.push(
-          `  <text x="${labelX}" y="${labelY}" font-size="${LAYOUT.FONTS.SECTION_HEADER * (96 / 72)}" fill="#000" font-family="Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif" dominant-baseline="hanging" font-weight="bold">${escapeSvgText(page2PhotoLabelText)}</text>`
-        );
-      }
-    }
-
-    if (pageNum === 1) {
-      const firstVisitDateCfg = page1Text.FIRST_VISIT_DATE;
-      const anesthesiaDateCfg = page1Text.ANESTHESIA_DATE;
-      if (!firstVisitDateCfg || !anesthesiaDateCfg) {
-        page1Images.START_Y = originalPage1ImageStartY;
-        page1Text.FIXED_CLOSING_TEXT.y = originalPage1FixedClosingY;
-        return { svgCode: '', fullSlideW, fullSlideH };
-      }
-
-      const firstVisitX = slideOffsetX + firstVisitDateCfg.x * pxPerCm;
-      const firstVisitY = slideOffsetY + firstVisitDateCfg.y * pxPerCm;
-      const lineGap = (anesthesiaDateCfg.y - firstVisitDateCfg.y) * pxPerCm;
-      const fontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
-
-      page1DateOutputItems.forEach((item, index) => {
-        const y = firstVisitY + lineGap * index;
-        svgParts.push(
-          `  <text x="${firstVisitX}" y="${y}" font-size="${fontPx}" fill="#000" font-family="Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif" dominant-baseline="hanging">${escapeSvgText(
-            `${item.label}：${item.value}`
-          )}</text>`
-        );
-      });
-    }
+    }));
 
     const svgCode = `
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${fullSlideW} ${fullSlideH}">
   <rect width="100%" height="100%" fill="${options.backgroundColor}" />
 ${svgParts.join('\n')}
 </svg>`.trim();
-
-    if (pageNum === 1) {
-      page1Images.START_Y = originalPage1ImageStartY;
-      page1Text.FIXED_CLOSING_TEXT.y = originalPage1FixedClosingY;
-    }
-    if (pageNum === 2 && typeof originalPage2ProcedureHeaderY === 'number') {
-      page2Text.SECTION_HEADER_PROCEDURE.y = originalPage2ProcedureHeaderY;
-    }
-    if (pageNum === 3 && page3Text.FREE_TEXT_PAGE3) {
-      if (typeof originalPage3FreeTextX === 'number') page3Text.FREE_TEXT_PAGE3.x = originalPage3FreeTextX;
-      if (typeof originalPage3FreeTextY === 'number') page3Text.FREE_TEXT_PAGE3.y = originalPage3FreeTextY;
-    }
 
     return { svgCode, fullSlideW, fullSlideH };
   }, [
@@ -1216,8 +706,7 @@ ${svgParts.join('\n')}
     getPageDimensions,
     reportFields,
     showPage3,
-    postPlacement,
-    page2PhotoLabelText
+    postPlacement
   ]);
 
 
@@ -1259,16 +748,18 @@ ${svgParts.join('\n')}
     const pet = (reportFields.petName || '').trim();
     const hospital = (reportFields.refHospitalName || reportFields.refHospital || '').trim();
     const doctor = (reportFields.refDoctor || '').trim();
-    const doctorWithSuffix = doctor ? `${doctor} ${DOCTOR_SUFFIX}` : DOCTOR_SUFFIX;
     const vet = (reportFields.attendingVet || '').trim();
-    const closingMessage = (reportFields.closingMessageText || '').trim() || DEFAULT_CLOSING_MESSAGE;
 
     const subject = `治療報告書（${owner}様 ${pet}ちゃん）`;
     const body = `${hospital} 御中
-  ${doctorWithSuffix}
+${doctor} 先生
 
 いつもお世話になっております。荻窪ツイン動物病院の${vet}です。
-  ${closingMessage}`;
+添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+
+---
+荻窪ツイン動物病院
+（住所などは今は不要。後で追加）`;
 
     setIsCreatingDraft(true);
     try {
@@ -1385,93 +876,10 @@ ${svgParts.join('\n')}
           });
         });
 
-        const page1Text = LAYOUT.PAGE1.TEXT as any;
-        const page2Text = LAYOUT.PAGE2.TEXT as any;
-        const page3Text = LAYOUT.PAGE3.TEXT as any;
-        const originalFirstVisitDateCfg = page1Text.FIRST_VISIT_DATE;
-        const originalAnesthesiaDateCfg = page1Text.ANESTHESIA_DATE;
-        const originalPage2ProcedureHeaderY = page2Text.SECTION_HEADER_PROCEDURE?.y;
-        const originalPage3FreeTextX = page3Text.FREE_TEXT_PAGE3?.x;
-        const originalPage3FreeTextY = page3Text.FREE_TEXT_PAGE3?.y;
-        try {
-          if (pageNum === 1) {
-            page1Text.FIRST_VISIT_DATE = undefined;
-            page1Text.ANESTHESIA_DATE = undefined;
-          }
-          if (pageNum === 2 && rowResults.length > 0 && typeof originalPage2ProcedureHeaderY === 'number') {
-            let imagesBottomCm: number = pageDims.startY;
-            rowResults.forEach((row) => {
-              row.images.forEach((item: any) => {
-                const bottomCm = pageDims.startY + (item.y + item.h) * cmPerPx;
-                if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
-              });
-            });
-
-            const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
-            const oneLineCm = (bodyFontPx * 1.15) * cmPerPx;
-            page2Text.SECTION_HEADER_PROCEDURE.y = imagesBottomCm + oneLineCm;
-          }
-          if (pageNum === 3 && showPage3 && postPlacement === 'page3' && page3Text.FREE_TEXT_PAGE3) {
-            if (rowResults.length > 0) {
-              let imagesBottomCm: number = pageDims.startY;
-              rowResults.forEach((row) => {
-                row.images.forEach((item: any) => {
-                  const bottomCm = pageDims.startY + (item.y + item.h) * cmPerPx;
-                  if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
-                });
-              });
-
-              const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
-              const oneLineCm = (bodyFontPx * 1.15) * cmPerPx;
-              page3Text.FREE_TEXT_PAGE3.y = imagesBottomCm + oneLineCm;
-            } else {
-              page3Text.FREE_TEXT_PAGE3.x = 1.04;
-              page3Text.FREE_TEXT_PAGE3.y = 1.9;
-            }
-          }
-
-          addPptxText(slide, pageNum, reportFields, {
-            showPage3,
-            postPlacement,
-          });
-        } finally {
-          if (pageNum === 1) {
-            page1Text.FIRST_VISIT_DATE = originalFirstVisitDateCfg;
-            page1Text.ANESTHESIA_DATE = originalAnesthesiaDateCfg;
-          }
-          if (pageNum === 2 && typeof originalPage2ProcedureHeaderY === 'number') {
-            page2Text.SECTION_HEADER_PROCEDURE.y = originalPage2ProcedureHeaderY;
-          }
-          if (pageNum === 3 && page3Text.FREE_TEXT_PAGE3) {
-            if (typeof originalPage3FreeTextX === 'number') page3Text.FREE_TEXT_PAGE3.x = originalPage3FreeTextX;
-            if (typeof originalPage3FreeTextY === 'number') page3Text.FREE_TEXT_PAGE3.y = originalPage3FreeTextY;
-          }
-        }
-
-        if (pageNum === 1) {
-
-          const lineGapCm = originalAnesthesiaDateCfg.y - originalFirstVisitDateCfg.y;
-          page1DateOutputItems.forEach((item, index) => {
-            slide.addText(`${item.label}：${item.value}`, {
-              x: originalFirstVisitDateCfg.x / 2.54,
-              y: (originalFirstVisitDateCfg.y + lineGapCm * index) / 2.54,
-              w: originalFirstVisitDateCfg.w / 2.54,
-              h: originalFirstVisitDateCfg.h / 2.54,
-              fontSize: LAYOUT.FONTS.BODY_BASE,
-            });
-          });
-        }
-
-        if (pageNum === 2 && page2PhotoLabelText) {
-          slide.addText(page2PhotoLabelText, {
-            x: 1.04 / 2.54,
-            y: 1.9 / 2.54,
-            w: 8.0 / 2.54,
-            h: 0.8 / 2.54,
-            fontSize: LAYOUT.FONTS.SECTION_HEADER,
-            bold: true,
-          });
-        }
+        addPptxText(slide, pageNum, reportFields, {
+          showPage3,
+          postPlacement,
+        });
       };
 
       outputPages.forEach(pageNum => {
@@ -1512,10 +920,10 @@ ${svgParts.join('\n')}
     }
   };
 
-  const svgData = useMemo(() => calculateSvgDataForPage(currentPage as 1 | 2 | 3, 'preview'), [calculateSvgDataForPage, currentPage]);
-  const svgPage1 = useMemo(() => calculateSvgDataForPage(1, 'export').svgCode, [calculateSvgDataForPage]);
-  const svgPage2 = useMemo(() => calculateSvgDataForPage(2, 'export').svgCode, [calculateSvgDataForPage]);
-  const svgPage3 = useMemo(() => calculateSvgDataForPage(3, 'export').svgCode, [calculateSvgDataForPage]);
+  const svgData = useMemo(() => calculateSvgDataForPage(currentPage as 1 | 2 | 3), [calculateSvgDataForPage, currentPage]);
+  const svgPage1 = useMemo(() => calculateSvgDataForPage(1).svgCode, [calculateSvgDataForPage]);
+  const svgPage2 = useMemo(() => calculateSvgDataForPage(2).svgCode, [calculateSvgDataForPage]);
+  const svgPage3 = useMemo(() => calculateSvgDataForPage(3).svgCode, [calculateSvgDataForPage]);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 font-sans">
@@ -1560,17 +968,16 @@ ${svgParts.join('\n')}
             </button>
           </div>
 
-          <div className="space-y-6" data-enter-scope="report-fields" onFocusCapture={handleReportFieldsFocusCapture}>
+          <div className="space-y-6">
             {/* 基本情報グリッド */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">報告日</label>
-                <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.reportDate)}`}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="2026年2月16日"
                   value={reportFields.reportDate}
                   onChange={e => setReportFields(v => ({ ...v, reportDate: e.target.value }))}
                   onBlur={e => setReportFields(v => ({ ...v, reportDate: normalizeJapaneseDate(e.target.value) }))}
-                  onKeyDown={handleEnterToNextField}
                 />
               </div>
               <div className="space-y-1">
@@ -1579,7 +986,7 @@ ${svgParts.join('\n')}
                 </label>
 
                 <input
-                  className={`w-full max-w-[520px] h-9 px-3 rounded-lg border text-sm ${getInputToneClass(refHospitalInput)}`}
+                  className="w-full max-w-[520px] h-9 px-3 rounded-lg border border-slate-300 bg-white text-sm"
                   placeholder="例：中川動物病院"
                   value={refHospitalInput}
                   onChange={(e) => applyRefHospitalSelection(e.target.value)}
@@ -1588,14 +995,8 @@ ${svgParts.join('\n')}
                     if (e.key === "Enter") {
                       e.preventDefault();
                       const v = e.currentTarget.value;
-                      const mappedEmail = normalizedRefHospitalEmails[normalizeHospitalKey(v)] || "";
                       applyRefHospitalSelection(v);
                       handleAddRefHospital(v);
-                      if (mappedEmail) {
-                        handleEnterToNextField(e, { targetSelector: 'input[data-enter-field="doctor"]' });
-                      } else {
-                        handleEnterToNextField(e);
-                      }
                     }
                   }}
                   list="refHospitalsList"
@@ -1615,11 +1016,10 @@ ${svgParts.join('\n')}
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">紹介病院メール（Gmail）</label>
-                <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.refHospitalEmail)}`}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="example@gmail.com"
                   value={reportFields.refHospitalEmail}
                   onChange={e => setReportFields(v => ({ ...v, refHospitalEmail: e.target.value }))}
-                  onKeyDown={handleEnterToNextField}
                 />
                 {!refHospitalError &&
                   (reportFields.refHospitalName || reportFields.refHospital).trim() !== '' &&
@@ -1631,360 +1031,108 @@ ${svgParts.join('\n')}
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">先生名</label>
-                <div className="relative">
-                  <input className={`w-full border rounded-xl px-3 pr-14 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.refDoctor)}`}
-                    placeholder="△△"
-                    value={reportFields.refDoctor}
-                    onChange={e => setReportFields(v => ({ ...v, refDoctor: e.target.value }))}
-                    onKeyDown={handleEnterToNextField}
-                    data-enter-field="doctor"
-                  />
-                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-500">先生</span>
-                </div>
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  placeholder="△△ 先生"
+                  value={reportFields.refDoctor}
+                  onChange={e => setReportFields(v => ({ ...v, refDoctor: e.target.value }))}
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">飼い主姓</label>
-                <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.ownerLastName)}`}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="山田"
                   value={reportFields.ownerLastName}
                   onChange={e => setReportFields(v => ({ ...v, ownerLastName: e.target.value }))}
-                  onKeyDown={handleEnterToNextField}
                 />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">ペット名</label>
-                <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.petName)}`}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="タロウ"
                   value={reportFields.petName}
                   onChange={e => setReportFields(v => ({ ...v, petName: e.target.value }))}
-                  onKeyDown={handleEnterToNextField}
                 />
               </div>
-              <div className="space-y-1 relative" data-date-field-root="true">
+              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">初診日</label>
-                <div className="relative" onClick={() => openDatePicker('firstVisitDate', firstVisitDateInputRef)}>
-                  <input
-                    ref={firstVisitDateInputRef}
-                    className={`w-full border rounded-xl px-3 pr-16 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.firstVisitDate)}`}
-                    type="text"
-                    readOnly
-                    placeholder="202X年XX月XX日"
-                    value={reportFields.firstVisitDate}
-                    onKeyDown={handleEnterToNextField}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setReportFields((v) => ({ ...v, firstVisitDate: '' }));
-                    }}
-                  >
-                    クリア
-                  </button>
-                </div>
-                {calendarOpenField === 'firstVisitDate' && (
-                  <div className="absolute left-0 top-full mt-2 rounded-2xl border border-slate-300 bg-white p-3 shadow-xl w-[315px] max-w-[88vw] z-30">
-                    <div className="mb-3 flex items-center justify-between">
-                      <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-8 w-8 rounded-lg border border-slate-300 text-base">◀</button>
-                      <div className="text-base font-black text-slate-700">{calendarViewDate.getFullYear()}年{calendarViewDate.getMonth() + 1}月</div>
-                      <button type="button" onClick={() => moveCalendarMonth(1)} className="h-8 w-8 rounded-lg border border-slate-300 text-base">▶</button>
-                    </div>
-                    <div className="grid grid-cols-7 gap-1.5">
-                      {weekdayLabels.map((d) => (
-                        <div key={d} className="text-center text-sm font-bold text-slate-500">{d}</div>
-                      ))}
-                      {calendarDays.map((d) => {
-                        if (!d.inMonth) {
-                          return <div key={d.iso} className="h-9" />;
-                        }
-                        const selected = toDateInputValue(reportFields.firstVisitDate) === d.iso;
-                        return (
-                          <button
-                            key={d.iso}
-                            type="button"
-                            className={`h-9 rounded-lg text-base font-semibold ${selected ? 'bg-orange-500 text-white' : 'bg-slate-50 text-slate-800 hover:bg-orange-50'}`}
-                            onClick={() => selectCalendarDate('firstVisitDate', d.iso)}
-                          >
-                            {d.day}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  placeholder="202X年XX月XX日"
+                  value={reportFields.firstVisitDate}
+                  onChange={e => setReportFields(v => ({ ...v, firstVisitDate: e.target.value }))}
+                  onBlur={e => setReportFields(v => ({ ...v, firstVisitDate: normalizeJapaneseDate(e.target.value) }))}
+                />
               </div>
-              <div className="space-y-1 relative" data-date-field-root="true">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">鎮静日</label>
-                <div className="relative" onClick={() => openDatePicker('sedationDate', sedationDateInputRef)}>
-                  <input
-                    ref={sedationDateInputRef}
-                    className={`w-full border rounded-xl px-3 pr-16 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.sedationDate)}`}
-                    type="text"
-                    readOnly
-                    placeholder="202X年XX月XX日"
-                    value={reportFields.sedationDate}
-                    onKeyDown={handleEnterToNextField}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setReportFields((v) => ({ ...v, sedationDate: '' }));
-                    }}
-                  >
-                    クリア
-                  </button>
-                </div>
-                {calendarOpenField === 'sedationDate' && (
-                  <div className="absolute left-0 top-full mt-2 rounded-2xl border border-slate-300 bg-white p-3 shadow-xl w-[315px] max-w-[88vw] z-30">
-                    <div className="mb-3 flex items-center justify-between">
-                      <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-8 w-8 rounded-lg border border-slate-300 text-base">◀</button>
-                      <div className="text-base font-black text-slate-700">{calendarViewDate.getFullYear()}年{calendarViewDate.getMonth() + 1}月</div>
-                      <button type="button" onClick={() => moveCalendarMonth(1)} className="h-8 w-8 rounded-lg border border-slate-300 text-base">▶</button>
-                    </div>
-                    <div className="grid grid-cols-7 gap-1.5">
-                      {weekdayLabels.map((d) => (
-                        <div key={d} className="text-center text-sm font-bold text-slate-500">{d}</div>
-                      ))}
-                      {calendarDays.map((d) => {
-                        if (!d.inMonth) {
-                          return <div key={d.iso} className="h-9" />;
-                        }
-                        const selected = toDateInputValue(reportFields.sedationDate) === d.iso;
-                        return (
-                          <button
-                            key={d.iso}
-                            type="button"
-                            className={`h-9 rounded-lg text-base font-semibold ${selected ? 'bg-orange-500 text-white' : 'bg-slate-50 text-slate-800 hover:bg-orange-50'}`}
-                            onClick={() => selectCalendarDate('sedationDate', d.iso)}
-                          >
-                            {d.day}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="space-y-1 relative" data-date-field-root="true">
+              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">全身麻酔日</label>
-                <div className="relative" onClick={() => openDatePicker('anesthesiaDate', anesthesiaDateInputRef)}>
-                  <input
-                    ref={anesthesiaDateInputRef}
-                    className={`w-full border rounded-xl px-3 pr-16 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.anesthesiaDate)}`}
-                    type="text"
-                    readOnly
-                    placeholder="202X年XX月XX日"
-                    value={reportFields.anesthesiaDate}
-                    onKeyDown={handleEnterToNextField}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[10px] font-semibold text-slate-500 hover:bg-slate-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setReportFields((v) => ({ ...v, anesthesiaDate: '' }));
-                    }}
-                  >
-                    クリア
-                  </button>
-                </div>
-                {calendarOpenField === 'anesthesiaDate' && (
-                  <div className="absolute left-0 top-full mt-2 rounded-2xl border border-slate-300 bg-white p-3 shadow-xl w-[315px] max-w-[88vw] z-30">
-                    <div className="mb-3 flex items-center justify-between">
-                      <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-8 w-8 rounded-lg border border-slate-300 text-base">◀</button>
-                      <div className="text-base font-black text-slate-700">{calendarViewDate.getFullYear()}年{calendarViewDate.getMonth() + 1}月</div>
-                      <button type="button" onClick={() => moveCalendarMonth(1)} className="h-8 w-8 rounded-lg border border-slate-300 text-base">▶</button>
-                    </div>
-                    <div className="grid grid-cols-7 gap-1.5">
-                      {weekdayLabels.map((d) => (
-                        <div key={d} className="text-center text-sm font-bold text-slate-500">{d}</div>
-                      ))}
-                      {calendarDays.map((d) => {
-                        if (!d.inMonth) {
-                          return <div key={d.iso} className="h-9" />;
-                        }
-                        const selected = toDateInputValue(reportFields.anesthesiaDate) === d.iso;
-                        return (
-                          <button
-                            key={d.iso}
-                            type="button"
-                            className={`h-9 rounded-lg text-base font-semibold ${selected ? 'bg-orange-500 text-white' : 'bg-slate-50 text-slate-800 hover:bg-orange-50'}`}
-                            onClick={() => selectCalendarDate('anesthesiaDate', d.iso)}
-                          >
-                            {d.day}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  placeholder="202X年XX月XX日"
+                  value={reportFields.anesthesiaDate}
+                  onChange={e => setReportFields(v => ({ ...v, anesthesiaDate: e.target.value }))}
+                  onBlur={e => setReportFields(v => ({ ...v, anesthesiaDate: normalizeJapaneseDate(e.target.value) }))}
+                />
               </div>
               {/* 担当獣医師（新規：プルダウン） */}
-              <div className="space-y-1 relative z-40" ref={attendingVetDropdownRef}>
+              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">担当獣医師</label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.attendingVet)}`}
-                    onClick={() => {
-                      setIsPage2PhotoLabelOpen(false);
-                      setIsPostPlacementOpen(false);
-                      setIsAttendingVetOpen((v) => !v);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !isAttendingVetOpen) {
-                        handleEnterToNextField(e as any);
-                      }
-                    }}
-                  >
-                    {reportFields.attendingVet || '選択してください'}
-                  </button>
-                  {isAttendingVetOpen && (
-                    <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                      {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name) => (
-                        <button
-                          key={name || 'empty'}
-                          type="button"
-                          className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
-                          onClick={() => {
-                            setReportFields(v => ({ ...v, attendingVet: name }));
-                            setIsAttendingVetOpen(false);
-                          }}
-                        >
-                          {name || '選択してください'}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-1 relative z-40" ref={page2PhotoLabelDropdownRef}>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">PAGE2写真区分ラベル</label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(page2PhotoLabel)}`}
-                    onClick={() => {
-                      setIsAttendingVetOpen(false);
-                      setIsPostPlacementOpen(false);
-                      setIsPage2PhotoLabelOpen((v) => !v);
-                    }}
-                  >
-                    {page2PhotoLabel === 'treatment-post'
-                      ? '治療時・治療後写真'
-                      : page2PhotoLabel === 'inspection'
-                        ? '検査時写真'
-                        : '空欄'}
-                  </button>
-                  {isPage2PhotoLabelOpen && (
-                    <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                      <button
-                        type="button"
-                        className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
-                        onClick={() => {
-                          setPage2PhotoLabel('');
-                          setIsPage2PhotoLabelOpen(false);
-                        }}
-                      >
-                        空欄
-                      </button>
-                      <button
-                        type="button"
-                        className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
-                        onClick={() => {
-                          setPage2PhotoLabel('treatment-post');
-                          setIsPage2PhotoLabelOpen(false);
-                        }}
-                      >
-                        治療時・治療後写真
-                      </button>
-                      <button
-                        type="button"
-                        className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
-                        onClick={() => {
-                          setPage2PhotoLabel('inspection');
-                          setIsPage2PhotoLabelOpen(false);
-                        }}
-                      >
-                        検査時写真
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-1 relative z-20">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">PAGE3設定</label>
-                <label className="h-9 px-3 border rounded-xl flex items-center gap-2 text-sm text-slate-700 font-semibold bg-white">
-                  <input
-                    type="checkbox"
-                    checked={showPage3}
-                    onChange={e => setShowPage3(e.target.checked)}
-                  />
-                  PAGE3を追加する
-                </label>
+                <select className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                  value={reportFields.attendingVet}
+                  onChange={e => setReportFields(v => ({ ...v, attendingVet: e.target.value }))}
+                >
+                  <option value="">選択してください</option>
+                  <option value="町田健吾">町田健吾</option>
+                  <option value="江成翔馬">江成翔馬</option>
+                  <option value="神田珠希">神田珠希</option>
+                  <option value="小林嵩">小林嵩</option>
+                  <option value="金田七海">金田七海</option>
+                </select>
               </div>
               {/* 主訴（新規：テキスト入力） */}
-              <div className="space-y-1 relative z-20 lg:col-span-3">
+              <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">主訴</label>
-                <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.chiefComplaint)}`}
+                <input className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="主な症状や主訴"
                   value={reportFields.chiefComplaint}
                   onChange={e => setReportFields(v => ({ ...v, chiefComplaint: e.target.value }))}
-                  onKeyDown={handleEnterToNextField}
                 />
               </div>
             </div>
 
             {/* PAGE3設定 */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700 font-semibold">
+                <input
+                  type="checkbox"
+                  checked={showPage3}
+                  onChange={e => setShowPage3(e.target.checked)}
+                />
+                PAGE3を追加する
+              </label>
+
               {showPage3 && (
-                <div className="space-y-1 relative z-40" ref={postPlacementDropdownRef}>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">出力順（PAGE2/PAGE3）</label>
+                  <select
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                    value={pageOrderMode}
+                    onChange={e => setPageOrderMode(e.target.value as 'page2-page3' | 'page3-page2')}
+                  >
+                    <option value="page2-page3">PAGE2 → PAGE3</option>
+                    <option value="page3-page2">PAGE3 → PAGE2</option>
+                  </select>
+                </div>
+              )}
+
+              {showPage3 && (
+                <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">術後経過の配置</label>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(postPlacement)}`}
-                      onClick={() => {
-                        setIsAttendingVetOpen(false);
-                        setIsPage2PhotoLabelOpen(false);
-                        setIsPostPlacementOpen((v) => !v);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !isPostPlacementOpen) {
-                          handleEnterToNextField(e as any);
-                        }
-                      }}
-                    >
-                      {postPlacement === 'page2' ? 'PAGE2に置く' : 'PAGE3に移す'}
-                    </button>
-                    {isPostPlacementOpen && (
-                      <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                        <button
-                          type="button"
-                          className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
-                          onClick={() => {
-                            setPostPlacement('page2');
-                            setIsPostPlacementOpen(false);
-                          }}
-                        >
-                          PAGE2に置く
-                        </button>
-                        <button
-                          type="button"
-                          className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
-                          onClick={() => {
-                            setPostPlacement('page3');
-                            setIsPostPlacementOpen(false);
-                          }}
-                        >
-                          PAGE3に移す
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <select
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                    value={postPlacement}
+                    onChange={e => setPostPlacement(e.target.value as 'page2' | 'page3')}
+                  >
+                    <option value="page2">PAGE2に置く</option>
+                    <option value="page3">PAGE3に移す</option>
+                  </select>
                 </div>
               )}
             </div>
@@ -1993,7 +1141,7 @@ ${svgParts.join('\n')}
             <div className="grid grid-cols-1 gap-4">
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
-                <textarea className={`w-full border rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getTextareaToneClass(reportFields.initialText)}`}
+                <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="初診時の所見など..."
                   value={reportFields.initialText}
                   onChange={e => setReportFields(v => ({ ...v, initialText: e.target.value }))}
@@ -2001,7 +1149,7 @@ ${svgParts.join('\n')}
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
-                <textarea className={`w-full border rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getTextareaToneClass(reportFields.procedureText)}`}
+                <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="実施した検査や処置の詳細..."
                   value={reportFields.procedureText}
                   onChange={e => setReportFields(v => ({ ...v, procedureText: e.target.value }))}
@@ -2009,7 +1157,7 @@ ${svgParts.join('\n')}
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【術後経過】本文 ({showPage3 && postPlacement === 'page3' ? 'Page 3' : 'Page 2'})</label>
-                <textarea className={`w-full border rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getTextareaToneClass(reportFields.postText)}`}
+                <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="術後の状態や今後の予定..."
                   value={reportFields.postText}
                   onChange={e => setReportFields(v => ({ ...v, postText: e.target.value }))}
@@ -2018,21 +1166,13 @@ ${svgParts.join('\n')}
               {showPage3 && (
                 <div className="space-y-1">
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【PAGE3】自由入力</label>
-                  <textarea className={`w-full border rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getTextareaToneClass(reportFields.page3Text || '')}`}
+                  <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                     placeholder="PAGE3に出す補足テキスト..."
                     value={reportFields.page3Text || ''}
                     onChange={e => setReportFields(v => ({ ...v, page3Text: e.target.value }))}
                   />
                 </div>
               )}
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">メール締め文</label>
-                <textarea className={`w-full border rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getTextareaToneClass(reportFields.closingMessageText || '')}`}
-                  placeholder="メール本文の締めメッセージ"
-                  value={reportFields.closingMessageText || ''}
-                  onChange={e => setReportFields(v => ({ ...v, closingMessageText: e.target.value }))}
-                />
-              </div>
             </div>
             {/* テンプレートピッカー */}
             <TemplatePicker
@@ -2064,7 +1204,6 @@ ${svgParts.join('\n')}
             <button
               onClick={() => {
                 console.log('image upload button clicked');
-                if (fileInputRef.current) fileInputRef.current.value = '';
                 fileInputRef.current?.click();
               }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-bold shadow-lg active:scale-95 flex items-center gap-2 transition-all"
@@ -2098,14 +1237,15 @@ ${svgParts.join('\n')}
 
         {/* 左カラム - 確定前のみ表示 */}
         {!isCurrentPageConfirmed && (
-          <div className="lg:col-span-5 lg:col-start-4 space-y-8">
+          <div className="lg:col-span-5 space-y-8">
             <LayoutControls options={options} setOptions={setOptions} />
 
             <div className="bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden space-y-8 relative">
               <section>
                 <div className="mb-6 flex justify-between items-start">
                   <div>
-                    <h3 className="font-black text-slate-800 text-base mb-1">Page {currentPage} - STEP1:画像編集・段落選択</h3>
+                    <h3 className="font-black text-slate-800 text-base mb-1">Page {currentPage} - STEP 1.1: 段落の選択</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">画像の下にある段落番号を選んでください</p>
                   </div>
                   {history.length > 0 && (
                     <button onClick={handleUndo} className="px-3 py-1.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-orange-50 hover:text-orange-600 transition-all border border-slate-200 flex items-center gap-1.5 shadow-sm active:scale-95">
@@ -2216,8 +1356,9 @@ ${svgParts.join('\n')}
         <div ref={rowBoardRef} className="lg:col-span-12 bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-4">
           <div>
             <h3 className="font-black text-slate-800 text-base mb-1">
-              {isCurrentPageConfirmed ? `Page ${currentPage} - STEP2:画像入替` : '段落ドラッグ移動'}
+              {isCurrentPageConfirmed ? `Page ${currentPage} - STEP 1.1: 段落` : '段落ドラッグ移動'}
             </h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">「段落移動」ハンドルをドラッグして段落間を移動できます</p>
           </div>
           <RowBoard images={images} setImages={setImages} rows={4} />
         </div>
