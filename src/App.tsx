@@ -199,6 +199,10 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const attendingVetDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isAttendingVetDropdownOpen, setIsAttendingVetDropdownOpen] = useState(false);
+  const page2PhotoCategoryDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [isPage2PhotoCategoryDropdownOpen, setIsPage2PhotoCategoryDropdownOpen] = useState(false);
+  const pageOrderDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [isPageOrderDropdownOpen, setIsPageOrderDropdownOpen] = useState(false);
   const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
 
@@ -1073,6 +1077,25 @@ ${doctor} 先生
   }, [isAttendingVetDropdownOpen]);
 
   useEffect(() => {
+    if (!isPage2PhotoCategoryDropdownOpen) return;
+
+    const closeWhenOutside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (page2PhotoCategoryDropdownRef.current?.contains(target)) return;
+      setIsPage2PhotoCategoryDropdownOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeWhenOutside, true);
+    document.addEventListener('focusin', closeWhenOutside, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside, true);
+      document.removeEventListener('focusin', closeWhenOutside, true);
+    };
+  }, [isPage2PhotoCategoryDropdownOpen]);
+
+  useEffect(() => {
     if (!isPostPlacementDropdownOpen) return;
 
     const closeWhenOutside = (event: Event) => {
@@ -1090,6 +1113,25 @@ ${doctor} 先生
       document.removeEventListener('focusin', closeWhenOutside, true);
     };
   }, [isPostPlacementDropdownOpen]);
+
+  useEffect(() => {
+    if (!isPageOrderDropdownOpen) return;
+
+    const closeWhenOutside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (pageOrderDropdownRef.current?.contains(target)) return;
+      setIsPageOrderDropdownOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeWhenOutside, true);
+    document.addEventListener('focusin', closeWhenOutside, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside, true);
+      document.removeEventListener('focusin', closeWhenOutside, true);
+    };
+  }, [isPageOrderDropdownOpen]);
 
   const calendarFirstDay = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1).getDay();
   const calendarDaysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
@@ -1188,7 +1230,6 @@ ${doctor} 先生
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="font-semibold text-slate-700 text-base mb-3">報告書データ入力</h3>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">現在の段落配置が自動で反映されます</p>
             </div>
             <button
               type="button"
@@ -1509,15 +1550,52 @@ ${doctor} 先生
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">PAGE2写真区分ラベル</label>
-                <select
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900"
-                  value={reportFields.page2PhotoCategory}
-                  onChange={e => setReportFields(v => ({ ...v, page2PhotoCategory: e.target.value }))}
-                >
-                  <option value="">空欄</option>
-                  <option value="treatment-after">治療時・治療後写真</option>
-                  <option value="inspection">検査時写真</option>
-                </select>
+                <div className="relative" ref={page2PhotoCategoryDropdownRef}>
+                  <button
+                    type="button"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900"
+                    aria-haspopup="listbox"
+                    aria-expanded={isPage2PhotoCategoryDropdownOpen}
+                    onClick={() => setIsPage2PhotoCategoryDropdownOpen(v => !v)}
+                  >
+                    <span className={reportFields.page2PhotoCategory ? 'text-slate-900' : 'text-slate-500'}>
+                      {reportFields.page2PhotoCategory === 'treatment-after'
+                        ? '治療時・治療後写真'
+                        : reportFields.page2PhotoCategory === 'inspection'
+                          ? '検査時写真'
+                          : '空欄'}
+                    </span>
+                  </button>
+
+                  {isPage2PhotoCategoryDropdownOpen && (
+                    <ul
+                      role="listbox"
+                      className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                    >
+                      {[
+                        { value: '', label: '空欄' },
+                        { value: 'treatment-after', label: '治療時・治療後写真' },
+                        { value: 'inspection', label: '検査時写真' },
+                      ].map((item) => {
+                        const isSelected = reportFields.page2PhotoCategory === item.value;
+                        return (
+                          <li key={`${item.value || 'empty'}-${item.label}`}>
+                            <button
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                              onClick={() => {
+                                setReportFields(v => ({ ...v, page2PhotoCategory: item.value }));
+                                setIsPage2PhotoCategoryDropdownOpen(false);
+                              }}
+                            >
+                              {item.label}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1537,14 +1615,45 @@ ${doctor} 先生
               {showPage3 && (
                 <div className="space-y-1">
                   <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">出力順（PAGE2/PAGE3）</label>
-                  <select
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all"
-                    value={pageOrderMode}
-                    onChange={e => setPageOrderMode(e.target.value as 'page2-page3' | 'page3-page2')}
-                  >
-                    <option value="page2-page3">PAGE2 → PAGE3</option>
-                    <option value="page3-page2">PAGE3 → PAGE2</option>
-                  </select>
+                  <div className="relative" ref={pageOrderDropdownRef}>
+                    <button
+                      type="button"
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900"
+                      aria-haspopup="listbox"
+                      aria-expanded={isPageOrderDropdownOpen}
+                      onClick={() => setIsPageOrderDropdownOpen(v => !v)}
+                    >
+                      {pageOrderMode === 'page3-page2' ? 'PAGE3 → PAGE2' : 'PAGE2 → PAGE3'}
+                    </button>
+
+                    {isPageOrderDropdownOpen && (
+                      <ul
+                        role="listbox"
+                        className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                      >
+                        {[
+                          { value: 'page2-page3', label: 'PAGE2 → PAGE3' },
+                          { value: 'page3-page2', label: 'PAGE3 → PAGE2' },
+                        ].map((item) => {
+                          const isSelected = pageOrderMode === item.value;
+                          return (
+                            <li key={`${item.value}-${item.label}`}>
+                              <button
+                                type="button"
+                                className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                                onClick={() => {
+                                  setPageOrderMode(item.value as 'page2-page3' | 'page3-page2');
+                                  setIsPageOrderDropdownOpen(false);
+                                }}
+                              >
+                                {item.label}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1568,21 +1677,21 @@ ${doctor} 先生
                         className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
                       >
                         {[
-                          { value: 'page2' as const, label: 'PAGE2に置く' },
-                          { value: 'page3' as const, label: 'PAGE3に移す' },
-                        ].map((option) => {
-                          const isSelected = postPlacement === option.value;
+                          { value: 'page2', label: 'PAGE2に置く' },
+                          { value: 'page3', label: 'PAGE3に移す' },
+                        ].map((item) => {
+                          const isSelected = postPlacement === item.value;
                           return (
-                            <li key={option.value}>
+                            <li key={`${item.value}-${item.label}`}>
                               <button
                                 type="button"
                                 className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
                                 onClick={() => {
-                                  setPostPlacement(option.value);
+                                  setPostPlacement(item.value as 'page2' | 'page3');
                                   setIsPostPlacementDropdownOpen(false);
                                 }}
                               >
-                                {option.label}
+                                {item.label}
                               </button>
                             </li>
                           );
