@@ -68,6 +68,27 @@ function buildPage3Body(reportFields: ReportFields, options?: RenderOptions) {
   return postSection;
 }
 
+function buildPage1DateLines(reportFields: ReportFields) {
+  const ordered = [
+    { label: '初診日', value: String(reportFields?.firstVisitDate || '') },
+    { label: '鎮静日', value: String((reportFields as any)?.sedationDate || '') },
+    { label: '全身麻酔日', value: String(reportFields?.anesthesiaDate || '') },
+  ];
+
+  return ordered.filter(item => String(item?.value || '').trim() !== '');
+}
+
+function getPage1DividerYcmByDateCount(dateCount: number, fallbackYcm: number) {
+  if (dateCount === 1) return 9.35;
+  if (dateCount === 2) return 9.79;
+  if (dateCount >= 3) return 10.2;
+  return fallbackYcm;
+}
+
+function getPage1ClosingTextYcmByDateCount(dateCount: number, fallbackYcm: number) {
+  return dateCount >= 3 ? 10.3 : fallbackYcm;
+}
+
 export function fitTextToBox(
   text: string,
   box: { w: number; h: number },
@@ -408,28 +429,30 @@ if (textCfg.HOSPITAL_EMAIL) {
       );
     }
 
-    // 5) 初診日 / 全身麻酔日 (二段表示)
+    // 5) 日付行（初診日 / 鎮静日 / 全身麻酔日）
+    const page1DateLines = buildPage1DateLines(reportFields);
+    const safePage1DateLines = Array.isArray(page1DateLines) ? page1DateLines : [];
+    const firstVisitCfg = textCfg.FIRST_VISIT_DATE;
+    const anesthesiaCfg = textCfg.ANESTHESIA_DATE;
+    const dateCount = safePage1DateLines.length;
+    const dateLineGapCm = firstVisitCfg && anesthesiaCfg
+      ? Math.max((anesthesiaCfg.y ?? 0) - (firstVisitCfg.y ?? 0), firstVisitCfg.h ?? 0.45)
+      : (firstVisitCfg?.h ?? 0.45);
 
-    // 6) 初診日 / 全身麻酔日
-    const firstVisitX = slideOffsetX + textCfg.FIRST_VISIT_DATE.x * pxPerCm;
-    const firstVisitY = slideOffsetY + textCfg.FIRST_VISIT_DATE.y * pxPerCm;
-    svgParts.push(
-      `  <text x="${firstVisitX}" y="${firstVisitY}" font-size="${ptToPx(
-        LAYOUT.FONTS.BODY_BASE
-      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
-        '初診日：' + (reportFields.firstVisitDate || '')
-      )}</text>`
-    );
-
-    const anesthesiaX = slideOffsetX + textCfg.ANESTHESIA_DATE.x * pxPerCm;
-    const anesthesiaY = slideOffsetY + textCfg.ANESTHESIA_DATE.y * pxPerCm;
-    svgParts.push(
-      `  <text x="${anesthesiaX}" y="${anesthesiaY}" font-size="${ptToPx(
-        LAYOUT.FONTS.BODY_BASE
-      )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
-        '全身麻酔日：' + (reportFields.anesthesiaDate || '')
-      )}</text>`
-    );
+    if (firstVisitCfg && safePage1DateLines.length > 0) {
+      const baseDateX = slideOffsetX + firstVisitCfg.x * pxPerCm;
+      const baseDateYcm = firstVisitCfg.y;
+      safePage1DateLines.forEach((line, idx) => {
+        const y = slideOffsetY + (baseDateYcm + idx * dateLineGapCm) * pxPerCm;
+        svgParts.push(
+          `  <text x="${baseDateX}" y="${y}" font-size="${ptToPx(
+            LAYOUT.FONTS.BODY_BASE
+          )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging">${escapeXml(
+            `${line.label}：${String(line.value || '').trim()}`
+          )}</text>`
+        );
+      });
+    }
 
     // 7) 定型文②
     if (textCfg.FIXED_CLOSING_TEXT) {
@@ -438,7 +461,7 @@ if (textCfg.HOSPITAL_EMAIL) {
       }」という主訴の為、拝見いたしました。`;
 
       const cx = slideOffsetX + textCfg.FIXED_CLOSING_TEXT.x * pxPerCm;
-      const cy = slideOffsetY + textCfg.FIXED_CLOSING_TEXT.y * pxPerCm;
+      const cy = slideOffsetY + getPage1ClosingTextYcmByDateCount(dateCount, textCfg.FIXED_CLOSING_TEXT.y) * pxPerCm;
       const cw = textCfg.FIXED_CLOSING_TEXT.w * pxPerCm;
       const ch = textCfg.FIXED_CLOSING_TEXT.h * pxPerCm;
 
@@ -473,7 +496,11 @@ if (textCfg.HOSPITAL_EMAIL) {
       const cfg = (textCfg as any)[key];
       if (cfg) {
         const lx = slideOffsetX + cfg.x * pxPerCm;
-        const ly = slideOffsetY + (cfg.y + cfg.h / 2) * pxPerCm;
+        const defaultLineYcm = cfg.y + cfg.h / 2;
+        const lineYcm = key === 'CUT_LINE_BOTTOM'
+          ? getPage1DividerYcmByDateCount(dateCount, defaultLineYcm)
+          : defaultLineYcm;
+        const ly = slideOffsetY + lineYcm * pxPerCm;
         const lw = cfg.w * pxPerCm;
         svgParts.push(`  <line x1="${lx}" y1="${ly}" x2="${lx + lw}" y2="${ly}" stroke="#000" stroke-width="${ptToPx(0.5)}" />`);
       }
@@ -937,32 +964,33 @@ if (textCfg.SEAL) {
       );
     }
 
-    if (textCfg.FIRST_VISIT_DATE) {
-  slide.addText(`初診日：${reportFields.firstVisitDate || ''}`, {
-    x: cmToInch(textCfg.FIRST_VISIT_DATE.x),
-    y: cmToInch(textCfg.FIRST_VISIT_DATE.y),
-    w: cmToInch(textCfg.FIRST_VISIT_DATE.w),
-    h: cmToInch(textCfg.FIRST_VISIT_DATE.h),
-    fontSize: LAYOUT.FONTS.BODY_BASE
-  });
-}
+    const page1DateLines = buildPage1DateLines(reportFields);
+    const safePage1DateLines = Array.isArray(page1DateLines) ? page1DateLines : [];
+    const firstVisitCfg = textCfg.FIRST_VISIT_DATE;
+    const anesthesiaCfg = textCfg.ANESTHESIA_DATE;
+    const dateCount = safePage1DateLines.length;
+    const dateLineGapCm = firstVisitCfg && anesthesiaCfg
+      ? Math.max((anesthesiaCfg.y ?? 0) - (firstVisitCfg.y ?? 0), firstVisitCfg.h ?? 0.45)
+      : (firstVisitCfg?.h ?? 0.45);
 
-if (textCfg.ANESTHESIA_DATE) {
-  slide.addText(`全身麻酔日：${reportFields.anesthesiaDate || ''}`, {
-    x: cmToInch(textCfg.ANESTHESIA_DATE.x),
-    y: cmToInch(textCfg.ANESTHESIA_DATE.y),
-    w: cmToInch(textCfg.ANESTHESIA_DATE.w),
-    h: cmToInch(textCfg.ANESTHESIA_DATE.h),
-    fontSize: LAYOUT.FONTS.BODY_BASE
-  });
-}
+    if (firstVisitCfg && safePage1DateLines.length > 0) {
+      safePage1DateLines.forEach((line, idx) => {
+        slide.addText(`${line.label}：${String(line.value || '').trim()}`, {
+          x: cmToInch(firstVisitCfg.x),
+          y: cmToInch(firstVisitCfg.y + idx * dateLineGapCm),
+          w: cmToInch(firstVisitCfg.w),
+          h: cmToInch(firstVisitCfg.h),
+          fontSize: LAYOUT.FONTS.BODY_BASE
+        });
+      });
+    }
 
     // 7) 定型文②
     if (textCfg.FIXED_CLOSING_TEXT) {
   const closingText = `「${reportFields.chiefComplaint || '[ 主訴 ]'}」という主訴の為、拝見いたしました。`;
   slide.addText(closingText, {
     x: cmToInch(textCfg.FIXED_CLOSING_TEXT.x),
-    y: cmToInch(textCfg.FIXED_CLOSING_TEXT.y),
+    y: cmToInch(getPage1ClosingTextYcmByDateCount(dateCount, textCfg.FIXED_CLOSING_TEXT.y)),
     w: cmToInch(textCfg.FIXED_CLOSING_TEXT.w),
     h: cmToInch(textCfg.FIXED_CLOSING_TEXT.h),
     fontSize: LAYOUT.FONTS.BODY_BASE,
@@ -974,9 +1002,13 @@ if (textCfg.ANESTHESIA_DATE) {
     ['CUT_LINE_TOP','CUT_LINE_BOTTOM','IMAGES_BOTTOM_LINE'].forEach(key=>{
       const cfg=(textCfg as any)[key];
       if(cfg){
+        const defaultLineYcm = cfg.y + (cfg.h / 2);
+        const lineYcm = key === 'CUT_LINE_BOTTOM'
+          ? getPage1DividerYcmByDateCount(dateCount, defaultLineYcm)
+          : defaultLineYcm;
         slide.addShape('line' as any,{
           x:cmToInch(cfg.x),
-          y:cmToInch(cfg.y + (cfg.h / 2)),
+          y:cmToInch(lineYcm),
           w:cmToInch(cfg.w),
           h:0,
           line:{ color: '000000', pt: 0.5 }
