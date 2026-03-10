@@ -536,14 +536,14 @@ if (textCfg.HOSPITAL_EMAIL) {
       );
     }
 
-    // 9) Images header 【初診時の肉眼写真等】
+    // 9) Images header 【処置前の肉眼写真等】
     if (textCfg.IMAGES_HEADER) {
       const imgHeaderX = slideOffsetX + textCfg.IMAGES_HEADER.x * pxPerCm;
       const imgHeaderY = slideOffsetY + (LAYOUT.PAGE1.IMAGES.START_Y - 0.5) * pxPerCm;
       svgParts.push(
         `  <text x="${imgHeaderX}" y="${imgHeaderY}" font-size="${ptToPx(
           LAYOUT.FONTS.SECTION_HEADER
-        )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【初診時の肉眼写真等】</text>`
+        )}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【処置前の肉眼写真等】</text>`
       );
     }
   } else if (pageNum === 2) {
@@ -672,20 +672,41 @@ if (textCfg.HOSPITAL_EMAIL) {
       const fontPt = LAYOUT.FONTS.BODY_BASE;
       const fontPx = ptToPx(fontPt);
       const fontFamily = svgFontFamily;
-      const lineHeight = fontPx * 1.15;
-      const maxLines = Math.max(1, Math.floor(bh / lineHeight));
+      const lineHeightPx = fontPx * 1.15;
+      const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
 
       const ctx = getMeasureContext(fontPx, fontFamily);
       const wrapped = wrapTextByMeasure(page3Body, bw, ctx);
       const visible = clampLines(wrapped, maxLines);
+      const postFirstLineExtraDyPx =
+        options?.showPage3 && options?.postPlacement === 'page3'
+          ? 0.19 * pxPerCm
+          : 0;
 
       const parts: string[] = [];
+      let sawPostHeader = false;
+      let shiftedFirstPostLine = false;
       visible.forEach((ln, idx) => {
         const lineText = ln === '' ? '　' : ln;
-        if (idx === 0)
-          parts.push(`<tspan x="${bx}" dy="0">${escapeXml(lineText)}</tspan>`);
-        else
-          parts.push(`<tspan x="${bx}" dy="${lineHeight}">${escapeXml(lineText)}</tspan>`);
+        if (lineText.includes('術後経過')) {
+          sawPostHeader = true;
+        }
+
+        const isFirstPostBodyLine =
+          sawPostHeader &&
+          lineText.trim() !== '' &&
+          !lineText.includes('術後経過') &&
+          !shiftedFirstPostLine;
+
+        const dyPx = idx === 0
+          ? 0
+          : lineHeightPx + (isFirstPostBodyLine ? postFirstLineExtraDyPx : 0);
+
+        if (isFirstPostBodyLine) {
+          shiftedFirstPostLine = true;
+        }
+
+        parts.push(`<tspan x="${bx}" dy="${dyPx}">${escapeXml(lineText)}</tspan>`);
       });
 
       svgParts.push(
@@ -997,9 +1018,9 @@ if (textCfg.ANESTHESIA_DATE) {
       });
     }
 
-    // 9) Images header 【初診時の肉眼写真等】
+    // 9) Images header 【処置前の肉眼写真等】
     if (textCfg.IMAGES_HEADER) {
-      slide.addText('【初診時の肉眼写真等】', {
+      slide.addText('【処置前の肉眼写真等】', {
         x: cmToInch(textCfg.IMAGES_HEADER.x),
         y: cmToInch(LAYOUT.PAGE1.IMAGES.START_Y - 0.5),
         w: cmToInch(textCfg.IMAGES_HEADER.w),

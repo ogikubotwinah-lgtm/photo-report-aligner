@@ -135,6 +135,123 @@ function fromDateInputValue(value: string): string {
   return `${m[1]}年${m[2]}月${m[3]}日`;
 }
 
+function escapeSvgText(value: string): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+const PREVIEW_TEXT_Y_OFFSETS_CM = {
+  initialText: 0,
+  procedureText: 0,
+  postText: 0,
+  page3Text: 0,
+  closingMessage: 0,
+} as const;
+
+type Page2PhotoLabelOption = '' | 'treatment-post' | 'inspection';
+
+type PreviewTextOffsetPx = {
+  initialText: number;
+  procedureText: number;
+  postText: number;
+  page3Text: number;
+  closingMessage: number;
+};
+
+function shiftSvgTextY(part: string, deltaPx: number): string {
+  if (!deltaPx) return part;
+  return part.replace(/ y="([^"]+)"/, (_m, y) => ` y="${Number(y) + deltaPx}"`);
+}
+
+function applyPreviewTextOffsets(pageNum: 1 | 2 | 3, parts: string[], offsets: PreviewTextOffsetPx): string[] {
+  if (pageNum === 1) {
+    let waitingInitialBody = false;
+    return parts.map((part) => {
+      if (part.includes('【初診時】')) {
+        waitingInitialBody = true;
+        return part;
+      }
+      if (waitingInitialBody && part.includes('<tspan') && !part.includes('【')) {
+        waitingInitialBody = false;
+        return shiftSvgTextY(part, offsets.initialText);
+      }
+      if (part.includes('という主訴の為、拝見いたしました。')) {
+        return shiftSvgTextY(part, offsets.closingMessage);
+      }
+      return part;
+    });
+  }
+
+  if (pageNum === 2) {
+    let waitingProcedureBody = false;
+    let waitingPostBody = false;
+    return parts.map((part) => {
+      if (part.includes('【検査・処置内容】')) {
+        waitingProcedureBody = true;
+        return part;
+      }
+      if (part.includes('【術後経過】')) {
+        waitingPostBody = true;
+        return part;
+      }
+      if (waitingProcedureBody && part.includes('<tspan')) {
+        waitingProcedureBody = false;
+        return shiftSvgTextY(part, offsets.procedureText);
+      }
+      if (waitingPostBody && part.includes('<tspan')) {
+        waitingPostBody = false;
+        return shiftSvgTextY(part, offsets.postText);
+      }
+      return part;
+    });
+  }
+
+  let shiftedPage3 = false;
+  return parts.map((part) => {
+    if (!shiftedPage3 && part.includes('<tspan')) {
+      shiftedPage3 = true;
+      return shiftSvgTextY(part, offsets.page3Text);
+    }
+    return part;
+  });
+}
+
+function estimateWrappedLineCount(text: string, maxWidthPx: number, fontPx: number, maxLines: number): number {
+  const source = String(text || '').trim();
+  if (!source) return 1;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 1;
+  ctx.font = `${fontPx}px Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif`;
+
+  let lines = 0;
+  source.split('\n').forEach((paragraph) => {
+    if (!paragraph) {
+      lines += 1;
+      return;
+    }
+    let current = '';
+    for (const ch of paragraph) {
+      const candidate = current + ch;
+      if (ctx.measureText(candidate).width <= maxWidthPx || current.length === 0) {
+        current = candidate;
+      } else {
+        lines += 1;
+        current = ch;
+      }
+      if (lines >= maxLines) break;
+    }
+    if (lines < maxLines) lines += 1;
+  });
+
+  return Math.min(Math.max(lines, 1), maxLines);
+}
+
 type PageSwitcherProps = {
   currentPage: number;
   onChange: (page: number) => void;
@@ -226,6 +343,8 @@ const App: React.FC = () => {
   const firstVisitDateInputRef = useRef<HTMLInputElement | null>(null);
   const sedationDateInputRef = useRef<HTMLInputElement | null>(null);
   const anesthesiaDateInputRef = useRef<HTMLInputElement | null>(null);
+  const page1CutLineBottomBaseYRef = useRef<number>((LAYOUT.PAGE1.TEXT as any).CUT_LINE_BOTTOM.y);
+  const page1FixedClosingBaseYRef = useRef<number>((LAYOUT.PAGE1.TEXT as any).FIXED_CLOSING_TEXT.y);
 
   // PageSwitcher には常に PAGE1-3 を表示
   const availablePages = useMemo<number[]>(() => [1, 2, 3], []);
@@ -340,6 +459,43 @@ const App: React.FC = () => {
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
+  const page1DateOutputItems = useMemo(() => {
+    return [
+      { label: '初診日', value: String(reportFields.firstVisitDate || '').trim() },
+      { label: '鎮静日', value: String(reportFields.sedationDate || '').trim() },
+      { label: '全身麻酔日', value: String(reportFields.anesthesiaDate || '').trim() },
+    ].filter((item) => item.value !== '');
+  }, [reportFields.firstVisitDate, reportFields.sedationDate, reportFields.anesthesiaDate]);
+
+  const filledDateCount = useMemo(() => {
+    return [
+      reportFields.firstVisitDate,
+      reportFields.sedationDate,
+      reportFields.anesthesiaDate,
+    ].reduce((count, value) => (String(value || '').trim() !== '' ? count + 1 : count), 0);
+  }, [reportFields.firstVisitDate, reportFields.sedationDate, reportFields.anesthesiaDate]);
+
+  useEffect(() => {
+    const page1Text = LAYOUT.PAGE1.TEXT as any;
+    if (filledDateCount === 1) {
+      page1Text.CUT_LINE_BOTTOM.y = 9.35;
+    } else if (filledDateCount === 2) {
+      page1Text.CUT_LINE_BOTTOM.y = 9.79;
+    } else if (filledDateCount === 3) {
+      page1Text.CUT_LINE_BOTTOM.y = 10.2;
+    } else {
+      page1Text.CUT_LINE_BOTTOM.y = page1CutLineBottomBaseYRef.current;
+    }
+
+    page1Text.FIXED_CLOSING_TEXT.y =
+      filledDateCount === 3 ? 10.3 : page1FixedClosingBaseYRef.current;
+
+    return () => {
+      page1Text.CUT_LINE_BOTTOM.y = page1CutLineBottomBaseYRef.current;
+      page1Text.FIXED_CLOSING_TEXT.y = page1FixedClosingBaseYRef.current;
+    };
+  }, [filledDateCount]);
+
   const getInputToneClass = useCallback(
     (value: string) => (value.trim() === '' ? 'border-amber-200 bg-amber-50/60' : 'border-slate-200 bg-white'),
     []
@@ -580,10 +736,42 @@ const [page2Confirmed, setPage2Confirmed] = useState(false);
 const [page3Confirmed, setPage3Confirmed] = useState(false);
 
 // ページ順モード（あなたの既存仕様に合わせて）
-const [pageOrderMode, setPageOrderMode] = useState<"page2-page3" | "page3-page2">("page2-page3");
+  const [pageOrderMode] = useState<"page2-page3" | "page3-page2">("page2-page3");
 
 // どこに「経過」を入れるか（既存がこれならOK）
 const [postPlacement, setPostPlacement] = useState<"page2" | "page3">("page2");
+const [isAttendingVetOpen, setIsAttendingVetOpen] = useState(false);
+const [page2PhotoLabel, setPage2PhotoLabel] = useState<Page2PhotoLabelOption>('treatment-post');
+const [isPage2PhotoLabelOpen, setIsPage2PhotoLabelOpen] = useState(false);
+const [isPostPlacementOpen, setIsPostPlacementOpen] = useState(false);
+const attendingVetDropdownRef = useRef<HTMLDivElement | null>(null);
+const page2PhotoLabelDropdownRef = useRef<HTMLDivElement | null>(null);
+const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
+const page2PhotoLabelText = useMemo(() => {
+  if (page2PhotoLabel === 'treatment-post') return '【治療時・治療後写真】';
+  if (page2PhotoLabel === 'inspection') return '【検査時写真】';
+  return '';
+}, [page2PhotoLabel]);
+
+useEffect(() => {
+  const closeIfOutside = (event: Event) => {
+    const target = event.target as Node | null;
+    if (!target) return;
+    if (attendingVetDropdownRef.current?.contains(target)) return;
+    if (page2PhotoLabelDropdownRef.current?.contains(target)) return;
+    if (postPlacementDropdownRef.current?.contains(target)) return;
+    setIsAttendingVetOpen(false);
+    setIsPage2PhotoLabelOpen(false);
+    setIsPostPlacementOpen(false);
+  };
+
+  document.addEventListener('mousedown', closeIfOutside);
+  document.addEventListener('focusin', closeIfOutside);
+  return () => {
+    document.removeEventListener('mousedown', closeIfOutside);
+    document.removeEventListener('focusin', closeIfOutside);
+  };
+}, []);
 
 
 // 出力順（PDF/PPTXの並びなどで使う想定）
@@ -799,7 +987,34 @@ useEffect(() => {
     return { xCm: clampedX, yCm, wCm: clampedW, hCm: clampedH };
   }, []);
 
-  const calculateSvgDataForPage = useCallback((pageNum: 1 | 2 | 3) => {
+  const calculateSvgDataForPage = useCallback((pageNum: 1 | 2 | 3, renderTarget: 'preview' | 'export' = 'preview') => {
+    const page1Text = LAYOUT.PAGE1.TEXT as any;
+    const page1Images = LAYOUT.PAGE1.IMAGES as any;
+    const page2Text = LAYOUT.PAGE2.TEXT as any;
+    const page3Text = LAYOUT.PAGE3.TEXT as any;
+    const originalPage1ImageStartY = page1Images.START_Y;
+    const originalPage1FixedClosingY = page1Text.FIXED_CLOSING_TEXT.y;
+    const originalPage2ProcedureHeaderY = page2Text.SECTION_HEADER_PROCEDURE?.y;
+    const originalPage3FreeTextX = page3Text.FREE_TEXT_PAGE3?.x;
+    const originalPage3FreeTextY = page3Text.FREE_TEXT_PAGE3?.y;
+
+    if (pageNum === 1) {
+      const bodyStartYcm = 11.8;
+      const fontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
+      const lineHeightPx = fontPx * 1.15;
+      const page1MaxW = LAYOUT.SLIDE.WIDTH_CM - page1Images.LEFT - page1Images.RIGHT;
+      const pxPerCmForPage1 = options.containerWidth / page1MaxW;
+      const bodyCfg = page1Text.FREE_TEXT_INITIAL;
+      const maxWidthPx = bodyCfg.w * pxPerCmForPage1;
+      const maxLines = Math.max(1, Math.floor((bodyCfg.h * pxPerCmForPage1) / lineHeightPx));
+      const lineCount = estimateWrappedLineCount(reportFields.initialText || '', maxWidthPx, fontPx, maxLines);
+      const lineHeightCm = lineHeightPx / pxPerCmForPage1;
+      const imageHeaderYcm = bodyStartYcm + lineCount * lineHeightCm + lineHeightCm;
+
+      page1Text.FIXED_CLOSING_TEXT.y = 10.3;
+      page1Images.START_Y = imageHeaderYcm + 0.5;
+    }
+
     const pageImages = allPagesImages[pageNum] ?? [];
     const pageConfirmed = pageImages.filter(img => img.row > 0);
     const pageRows = [1, 2, 3, 4].map(r => pageConfirmed.filter(img => img.row === r));
@@ -855,17 +1070,141 @@ useEffect(() => {
       });
     });
 
+    if (pageNum === 2 && rowResults.length > 0 && typeof originalPage2ProcedureHeaderY === 'number') {
+      let imagesBottomCm: number = imgCfg.START_Y;
+      rowResults.forEach((row) => {
+        row.images.forEach((item: any) => {
+          const bottomCm = imgCfg.START_Y + (item.y + item.h) / pxPerCm;
+          if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
+        });
+      });
+
+      const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
+      const oneLineCm = (bodyFontPx * 1.15) / pxPerCm;
+      page2Text.SECTION_HEADER_PROCEDURE.y = imagesBottomCm + oneLineCm;
+    }
+
+    if (pageNum === 3 && showPage3 && postPlacement === 'page3' && page3Text.FREE_TEXT_PAGE3) {
+      if (rowResults.length > 0) {
+        let imagesBottomCm: number = imgCfg.START_Y;
+        rowResults.forEach((row) => {
+          row.images.forEach((item: any) => {
+            const bottomCm = imgCfg.START_Y + (item.y + item.h) / pxPerCm;
+            if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
+          });
+        });
+
+        const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
+        const oneLineCm = (bodyFontPx * 1.15) / pxPerCm;
+        page3Text.FREE_TEXT_PAGE3.y = imagesBottomCm + oneLineCm;
+      } else {
+        page3Text.FREE_TEXT_PAGE3.x = 1.04;
+        page3Text.FREE_TEXT_PAGE3.y = 1.9;
+      }
+    }
+
     // use shared helper to render all text portions so that SVG and PPTX stay in sync
-    svgParts.push(...buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
+    const originalCutLineBottomY = page1Text.CUT_LINE_BOTTOM.y;
+    const originalFixedClosingY = page1Text.FIXED_CLOSING_TEXT.y;
+
+    if (pageNum === 1) {
+      if (filledDateCount === 1) {
+        page1Text.CUT_LINE_BOTTOM.y = 9.35;
+      } else if (filledDateCount === 2) {
+        page1Text.CUT_LINE_BOTTOM.y = 9.79;
+      } else if (filledDateCount === 3) {
+        page1Text.CUT_LINE_BOTTOM.y = 10.2;
+      } else {
+        page1Text.CUT_LINE_BOTTOM.y = page1CutLineBottomBaseYRef.current;
+      }
+      page1Text.FIXED_CLOSING_TEXT.y = 10.3;
+    }
+
+    const builtTextParts = buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
       showPage3,
       postPlacement,
-    }));
+    });
+
+    const previewOffsetsPx: PreviewTextOffsetPx = {
+      initialText: PREVIEW_TEXT_Y_OFFSETS_CM.initialText * pxPerCm,
+      procedureText: PREVIEW_TEXT_Y_OFFSETS_CM.procedureText * pxPerCm,
+      postText: PREVIEW_TEXT_Y_OFFSETS_CM.postText * pxPerCm,
+      page3Text: PREVIEW_TEXT_Y_OFFSETS_CM.page3Text * pxPerCm,
+      closingMessage: PREVIEW_TEXT_Y_OFFSETS_CM.closingMessage * pxPerCm,
+    };
+    const resolvedTextParts =
+      renderTarget === 'preview'
+        ? applyPreviewTextOffsets(pageNum, builtTextParts, previewOffsetsPx)
+        : builtTextParts;
+
+    if (pageNum === 1) {
+      page1Text.CUT_LINE_BOTTOM.y = originalCutLineBottomY;
+      page1Text.FIXED_CLOSING_TEXT.y = originalFixedClosingY;
+    }
+    if (pageNum === 1) {
+      svgParts.push(
+        ...resolvedTextParts.filter(
+          (part) => !part.includes('初診日：') && !part.includes('鎮静日：') && !part.includes('全身麻酔日：') && !part.includes('【初診時】')
+        )
+      );
+
+      const sectionHeaderX = slideOffsetX + page1Text.SECTION_HEADER.x * pxPerCm;
+      const sectionHeaderY = slideOffsetY + 11.07 * pxPerCm;
+      svgParts.push(
+        `  <text x="${sectionHeaderX}" y="${sectionHeaderY}" font-size="${LAYOUT.FONTS.SECTION_HEADER * (96 / 72)}" fill="#000" font-family="Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif" dominant-baseline="hanging" font-weight="bold">【初診時】</text>`
+      );
+    } else {
+      svgParts.push(...resolvedTextParts);
+      if (pageNum === 2 && page2PhotoLabelText) {
+        const labelX = slideOffsetX + 1.04 * pxPerCm;
+        const labelY = slideOffsetY + 1.9 * pxPerCm;
+        svgParts.push(
+          `  <text x="${labelX}" y="${labelY}" font-size="${LAYOUT.FONTS.SECTION_HEADER * (96 / 72)}" fill="#000" font-family="Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif" dominant-baseline="hanging" font-weight="bold">${escapeSvgText(page2PhotoLabelText)}</text>`
+        );
+      }
+    }
+
+    if (pageNum === 1) {
+      const firstVisitDateCfg = page1Text.FIRST_VISIT_DATE;
+      const anesthesiaDateCfg = page1Text.ANESTHESIA_DATE;
+      if (!firstVisitDateCfg || !anesthesiaDateCfg) {
+        page1Images.START_Y = originalPage1ImageStartY;
+        page1Text.FIXED_CLOSING_TEXT.y = originalPage1FixedClosingY;
+        return { svgCode: '', fullSlideW, fullSlideH };
+      }
+
+      const firstVisitX = slideOffsetX + firstVisitDateCfg.x * pxPerCm;
+      const firstVisitY = slideOffsetY + firstVisitDateCfg.y * pxPerCm;
+      const lineGap = (anesthesiaDateCfg.y - firstVisitDateCfg.y) * pxPerCm;
+      const fontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
+
+      page1DateOutputItems.forEach((item, index) => {
+        const y = firstVisitY + lineGap * index;
+        svgParts.push(
+          `  <text x="${firstVisitX}" y="${y}" font-size="${fontPx}" fill="#000" font-family="Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif" dominant-baseline="hanging">${escapeSvgText(
+            `${item.label}：${item.value}`
+          )}</text>`
+        );
+      });
+    }
 
     const svgCode = `
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${fullSlideW} ${fullSlideH}">
   <rect width="100%" height="100%" fill="${options.backgroundColor}" />
 ${svgParts.join('\n')}
 </svg>`.trim();
+
+    if (pageNum === 1) {
+      page1Images.START_Y = originalPage1ImageStartY;
+      page1Text.FIXED_CLOSING_TEXT.y = originalPage1FixedClosingY;
+    }
+    if (pageNum === 2 && typeof originalPage2ProcedureHeaderY === 'number') {
+      page2Text.SECTION_HEADER_PROCEDURE.y = originalPage2ProcedureHeaderY;
+    }
+    if (pageNum === 3 && page3Text.FREE_TEXT_PAGE3) {
+      if (typeof originalPage3FreeTextX === 'number') page3Text.FREE_TEXT_PAGE3.x = originalPage3FreeTextX;
+      if (typeof originalPage3FreeTextY === 'number') page3Text.FREE_TEXT_PAGE3.y = originalPage3FreeTextY;
+    }
 
     return { svgCode, fullSlideW, fullSlideH };
   }, [
@@ -877,7 +1216,8 @@ ${svgParts.join('\n')}
     getPageDimensions,
     reportFields,
     showPage3,
-    postPlacement
+    postPlacement,
+    page2PhotoLabelText
   ]);
 
 
@@ -1045,10 +1385,93 @@ ${svgParts.join('\n')}
           });
         });
 
-        addPptxText(slide, pageNum, reportFields, {
-          showPage3,
-          postPlacement,
-        });
+        const page1Text = LAYOUT.PAGE1.TEXT as any;
+        const page2Text = LAYOUT.PAGE2.TEXT as any;
+        const page3Text = LAYOUT.PAGE3.TEXT as any;
+        const originalFirstVisitDateCfg = page1Text.FIRST_VISIT_DATE;
+        const originalAnesthesiaDateCfg = page1Text.ANESTHESIA_DATE;
+        const originalPage2ProcedureHeaderY = page2Text.SECTION_HEADER_PROCEDURE?.y;
+        const originalPage3FreeTextX = page3Text.FREE_TEXT_PAGE3?.x;
+        const originalPage3FreeTextY = page3Text.FREE_TEXT_PAGE3?.y;
+        try {
+          if (pageNum === 1) {
+            page1Text.FIRST_VISIT_DATE = undefined;
+            page1Text.ANESTHESIA_DATE = undefined;
+          }
+          if (pageNum === 2 && rowResults.length > 0 && typeof originalPage2ProcedureHeaderY === 'number') {
+            let imagesBottomCm: number = pageDims.startY;
+            rowResults.forEach((row) => {
+              row.images.forEach((item: any) => {
+                const bottomCm = pageDims.startY + (item.y + item.h) * cmPerPx;
+                if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
+              });
+            });
+
+            const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
+            const oneLineCm = (bodyFontPx * 1.15) * cmPerPx;
+            page2Text.SECTION_HEADER_PROCEDURE.y = imagesBottomCm + oneLineCm;
+          }
+          if (pageNum === 3 && showPage3 && postPlacement === 'page3' && page3Text.FREE_TEXT_PAGE3) {
+            if (rowResults.length > 0) {
+              let imagesBottomCm: number = pageDims.startY;
+              rowResults.forEach((row) => {
+                row.images.forEach((item: any) => {
+                  const bottomCm = pageDims.startY + (item.y + item.h) * cmPerPx;
+                  if (bottomCm > imagesBottomCm) imagesBottomCm = bottomCm;
+                });
+              });
+
+              const bodyFontPx = LAYOUT.FONTS.BODY_BASE * (96 / 72);
+              const oneLineCm = (bodyFontPx * 1.15) * cmPerPx;
+              page3Text.FREE_TEXT_PAGE3.y = imagesBottomCm + oneLineCm;
+            } else {
+              page3Text.FREE_TEXT_PAGE3.x = 1.04;
+              page3Text.FREE_TEXT_PAGE3.y = 1.9;
+            }
+          }
+
+          addPptxText(slide, pageNum, reportFields, {
+            showPage3,
+            postPlacement,
+          });
+        } finally {
+          if (pageNum === 1) {
+            page1Text.FIRST_VISIT_DATE = originalFirstVisitDateCfg;
+            page1Text.ANESTHESIA_DATE = originalAnesthesiaDateCfg;
+          }
+          if (pageNum === 2 && typeof originalPage2ProcedureHeaderY === 'number') {
+            page2Text.SECTION_HEADER_PROCEDURE.y = originalPage2ProcedureHeaderY;
+          }
+          if (pageNum === 3 && page3Text.FREE_TEXT_PAGE3) {
+            if (typeof originalPage3FreeTextX === 'number') page3Text.FREE_TEXT_PAGE3.x = originalPage3FreeTextX;
+            if (typeof originalPage3FreeTextY === 'number') page3Text.FREE_TEXT_PAGE3.y = originalPage3FreeTextY;
+          }
+        }
+
+        if (pageNum === 1) {
+
+          const lineGapCm = originalAnesthesiaDateCfg.y - originalFirstVisitDateCfg.y;
+          page1DateOutputItems.forEach((item, index) => {
+            slide.addText(`${item.label}：${item.value}`, {
+              x: originalFirstVisitDateCfg.x / 2.54,
+              y: (originalFirstVisitDateCfg.y + lineGapCm * index) / 2.54,
+              w: originalFirstVisitDateCfg.w / 2.54,
+              h: originalFirstVisitDateCfg.h / 2.54,
+              fontSize: LAYOUT.FONTS.BODY_BASE,
+            });
+          });
+        }
+
+        if (pageNum === 2 && page2PhotoLabelText) {
+          slide.addText(page2PhotoLabelText, {
+            x: 1.04 / 2.54,
+            y: 1.9 / 2.54,
+            w: 8.0 / 2.54,
+            h: 0.8 / 2.54,
+            fontSize: LAYOUT.FONTS.SECTION_HEADER,
+            bold: true,
+          });
+        }
       };
 
       outputPages.forEach(pageNum => {
@@ -1089,10 +1512,10 @@ ${svgParts.join('\n')}
     }
   };
 
-  const svgData = useMemo(() => calculateSvgDataForPage(currentPage as 1 | 2 | 3), [calculateSvgDataForPage, currentPage]);
-  const svgPage1 = useMemo(() => calculateSvgDataForPage(1).svgCode, [calculateSvgDataForPage]);
-  const svgPage2 = useMemo(() => calculateSvgDataForPage(2).svgCode, [calculateSvgDataForPage]);
-  const svgPage3 = useMemo(() => calculateSvgDataForPage(3).svgCode, [calculateSvgDataForPage]);
+  const svgData = useMemo(() => calculateSvgDataForPage(currentPage as 1 | 2 | 3, 'preview'), [calculateSvgDataForPage, currentPage]);
+  const svgPage1 = useMemo(() => calculateSvgDataForPage(1, 'export').svgCode, [calculateSvgDataForPage]);
+  const svgPage2 = useMemo(() => calculateSvgDataForPage(2, 'export').svgCode, [calculateSvgDataForPage]);
+  const svgPage3 = useMemo(() => calculateSvgDataForPage(3, 'export').svgCode, [calculateSvgDataForPage]);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 font-sans">
@@ -1400,23 +1823,111 @@ ${svgParts.join('\n')}
                 )}
               </div>
               {/* 担当獣医師（新規：プルダウン） */}
-              <div className="space-y-1 relative z-20">
+              <div className="space-y-1 relative z-40" ref={attendingVetDropdownRef}>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">担当獣医師</label>
-                <select className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.attendingVet)}`}
-                  value={reportFields.attendingVet}
-                  onChange={e => setReportFields(v => ({ ...v, attendingVet: e.target.value }))}
-                  onKeyDown={handleEnterToNextField}
-                >
-                  <option value="">選択してください</option>
-                  <option value="町田健吾">町田健吾</option>
-                  <option value="江成翔馬">江成翔馬</option>
-                  <option value="神田珠希">神田珠希</option>
-                  <option value="小林嵩">小林嵩</option>
-                  <option value="金田七海">金田七海</option>
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.attendingVet)}`}
+                    onClick={() => {
+                      setIsPage2PhotoLabelOpen(false);
+                      setIsPostPlacementOpen(false);
+                      setIsAttendingVetOpen((v) => !v);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !isAttendingVetOpen) {
+                        handleEnterToNextField(e as any);
+                      }
+                    }}
+                  >
+                    {reportFields.attendingVet || '選択してください'}
+                  </button>
+                  {isAttendingVetOpen && (
+                    <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                      {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name) => (
+                        <button
+                          key={name || 'empty'}
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
+                          onClick={() => {
+                            setReportFields(v => ({ ...v, attendingVet: name }));
+                            setIsAttendingVetOpen(false);
+                          }}
+                        >
+                          {name || '選択してください'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1 relative z-40" ref={page2PhotoLabelDropdownRef}>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">PAGE2写真区分ラベル</label>
+                <div className="relative">
+                  <button
+                    type="button"
+                    className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(page2PhotoLabel)}`}
+                    onClick={() => {
+                      setIsAttendingVetOpen(false);
+                      setIsPostPlacementOpen(false);
+                      setIsPage2PhotoLabelOpen((v) => !v);
+                    }}
+                  >
+                    {page2PhotoLabel === 'treatment-post'
+                      ? '治療時・治療後写真'
+                      : page2PhotoLabel === 'inspection'
+                        ? '検査時写真'
+                        : '空欄'}
+                  </button>
+                  {isPage2PhotoLabelOpen && (
+                    <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
+                        onClick={() => {
+                          setPage2PhotoLabel('');
+                          setIsPage2PhotoLabelOpen(false);
+                        }}
+                      >
+                        空欄
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
+                        onClick={() => {
+                          setPage2PhotoLabel('treatment-post');
+                          setIsPage2PhotoLabelOpen(false);
+                        }}
+                      >
+                        治療時・治療後写真
+                      </button>
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
+                        onClick={() => {
+                          setPage2PhotoLabel('inspection');
+                          setIsPage2PhotoLabelOpen(false);
+                        }}
+                      >
+                        検査時写真
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1 relative z-20">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">PAGE3設定</label>
+                <label className="h-9 px-3 border rounded-xl flex items-center gap-2 text-sm text-slate-700 font-semibold bg-white">
+                  <input
+                    type="checkbox"
+                    checked={showPage3}
+                    onChange={e => setShowPage3(e.target.checked)}
+                  />
+                  PAGE3を追加する
+                </label>
               </div>
               {/* 主訴（新規：テキスト入力） */}
-              <div className="space-y-1 relative z-20">
+              <div className="space-y-1 relative z-20 lg:col-span-3">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">主訴</label>
                 <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(reportFields.chiefComplaint)}`}
                   placeholder="主な症状や主訴"
@@ -1429,40 +1940,51 @@ ${svgParts.join('\n')}
 
             {/* PAGE3設定 */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <label className="flex items-center gap-2 text-sm text-slate-700 font-semibold">
-                <input
-                  type="checkbox"
-                  checked={showPage3}
-                  onChange={e => setShowPage3(e.target.checked)}
-                />
-                PAGE3を追加する
-              </label>
-
               {showPage3 && (
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">出力順（PAGE2/PAGE3）</label>
-                  <select
-                    className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(pageOrderMode)}`}
-                    value={pageOrderMode}
-                    onChange={e => setPageOrderMode(e.target.value as 'page2-page3' | 'page3-page2')}
-                  >
-                    <option value="page2-page3">PAGE2 → PAGE3</option>
-                    <option value="page3-page2">PAGE3 → PAGE2</option>
-                  </select>
-                </div>
-              )}
-
-              {showPage3 && (
-                <div className="space-y-1">
+                <div className="space-y-1 relative z-40" ref={postPlacementDropdownRef}>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">術後経過の配置</label>
-                  <select
-                    className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(postPlacement)}`}
-                    value={postPlacement}
-                    onChange={e => setPostPlacement(e.target.value as 'page2' | 'page3')}
-                  >
-                    <option value="page2">PAGE2に置く</option>
-                    <option value="page3">PAGE3に移す</option>
-                  </select>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getInputToneClass(postPlacement)}`}
+                      onClick={() => {
+                        setIsAttendingVetOpen(false);
+                        setIsPage2PhotoLabelOpen(false);
+                        setIsPostPlacementOpen((v) => !v);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !isPostPlacementOpen) {
+                          handleEnterToNextField(e as any);
+                        }
+                      }}
+                    >
+                      {postPlacement === 'page2' ? 'PAGE2に置く' : 'PAGE3に移す'}
+                    </button>
+                    {isPostPlacementOpen && (
+                      <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                        <button
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
+                          onClick={() => {
+                            setPostPlacement('page2');
+                            setIsPostPlacementOpen(false);
+                          }}
+                        >
+                          PAGE2に置く
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-base hover:bg-slate-100"
+                          onClick={() => {
+                            setPostPlacement('page3');
+                            setIsPostPlacementOpen(false);
+                          }}
+                        >
+                          PAGE3に移す
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
