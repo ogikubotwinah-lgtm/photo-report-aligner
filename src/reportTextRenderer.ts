@@ -6,35 +6,81 @@ import { cmToInch } from './utils/units';
 import { getStampUrlByVetName } from './stamps';
 
 const INTRO_LINE_SPACING_MULTIPLE = 1.25;
-const INITIAL_BLOCK_LINE_GAP_CM = 0.45;
-const INITIAL_BLOCK_AFTER_BODY_GAP_LINES = 2;
+const PAGE1_INITIAL_SECTION_HEADER_Y_CM = 11.07;
+const PAGE1_INITIAL_BODY_Y_CM = 11.8;
+const PAGE1_IMAGES_HEADER_AFTER_BODY_LINES = 1;
+const PAGE1_IMAGE_START_EXTRA_CM = 0.0;
 
-function getPage1InitialBlockLayout(textCfg: any) {
-  const subjectCfg = textCfg.FIXED_CLOSING_TEXT;
-  const sectionHeaderCfg = textCfg.SECTION_HEADER;
+function getPage1InitialBodyMetricsCm(
+  textCfg: any,
+  reportFields: ReportFields,
+  fontFamily: string
+) {
   const bodyCfg = textCfg.FREE_TEXT_INITIAL;
-  const imagesHeaderCfg = textCfg.IMAGES_HEADER;
 
-  const fallbackSectionY = sectionHeaderCfg?.y ?? 0;
-  const fallbackBodyY = bodyCfg?.y ?? 0;
-  const fallbackImagesHeaderY = imagesHeaderCfg?.y ?? 0;
-  const bodyHeight = bodyCfg?.h ?? 0;
+  const fontPt = LAYOUT.FONTS.BODY_BASE;
+  const fontPx = ptToPx(fontPt);
+  const lineHeightPx = fontPx * 1.15;
+  const lineHeightCm = (lineHeightPx / 96) * 2.54;
 
-  if (!subjectCfg) {
-    return {
-      sectionHeaderY: fallbackSectionY,
-      bodyY: fallbackBodyY,
-      imagesHeaderY: fallbackImagesHeaderY,
-    };
+  if (!bodyCfg) {
+    return { lineHeightCm, bodyLineCount: 1 };
   }
 
-  const subjectBottomY = subjectCfg.y + subjectCfg.h;
-  const sectionHeaderY = subjectBottomY + INITIAL_BLOCK_LINE_GAP_CM;
-  const bodyY = sectionHeaderY + INITIAL_BLOCK_LINE_GAP_CM;
-  const imagesHeaderY =
-    bodyY + bodyHeight + INITIAL_BLOCK_LINE_GAP_CM * INITIAL_BLOCK_AFTER_BODY_GAP_LINES;
+  const bodyWidthPx = (bodyCfg.w / 2.54) * 96;
+  const bodyHeightPx = (bodyCfg.h / 2.54) * 96;
+  const maxLines = Math.max(1, Math.floor(bodyHeightPx / lineHeightPx));
 
-  return { sectionHeaderY, bodyY, imagesHeaderY };
+  const initialText = String(reportFields.initialText || '');
+  if (initialText.trim() === '') {
+    return { lineHeightCm, bodyLineCount: 1 };
+  }
+
+  const ctx = getMeasureContext(fontPx, fontFamily);
+  const wrapped = wrapTextByMeasure(initialText, bodyWidthPx, ctx);
+  const visible = clampLines(wrapped, maxLines);
+
+  return {
+    lineHeightCm,
+    bodyLineCount: Math.max(1, visible.length),
+  };
+}
+
+function getPage1InitialBlockLayout(
+  textCfg: any,
+  reportFields: ReportFields,
+  fontFamily: string
+) {
+  const bodyCfg = textCfg.FREE_TEXT_INITIAL;
+  const sectionHeaderCfg = textCfg.SECTION_HEADER;
+  const imagesHeaderCfg = textCfg.IMAGES_HEADER;
+
+  const sectionHeaderY =
+    typeof sectionHeaderCfg?.y === 'number'
+      ? PAGE1_INITIAL_SECTION_HEADER_Y_CM
+      : sectionHeaderCfg?.y ?? 0;
+  const bodyY =
+    typeof bodyCfg?.y === 'number' ? PAGE1_INITIAL_BODY_Y_CM : bodyCfg?.y ?? 0;
+
+  const { lineHeightCm, bodyLineCount } = getPage1InitialBodyMetricsCm(
+    textCfg,
+    reportFields,
+    fontFamily
+  );
+  const imagesHeaderY =
+    bodyY + lineHeightCm * (bodyLineCount + PAGE1_IMAGES_HEADER_AFTER_BODY_LINES);
+
+  const imagesHeaderHeightCm = imagesHeaderCfg?.h ?? 0;
+  const imageStartY =
+    imagesHeaderY + imagesHeaderHeightCm + PAGE1_IMAGE_START_EXTRA_CM;
+
+  return { sectionHeaderY, bodyY, imagesHeaderY, imageStartY };
+}
+
+export function getPage1ImageStartYcm(reportFields: ReportFields) {
+  const textCfg = LAYOUT.PAGE1.TEXT as any;
+  const fontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
+  return getPage1InitialBlockLayout(textCfg, reportFields, fontFamily).imageStartY;
 }
 
 
@@ -221,6 +267,8 @@ const normalizeJapaneseSentence = (text: string) =>
 type RenderOptions = {
   showPage3?: boolean;
   postPlacement?: 'page2' | 'page3';
+  page2ImagesBottomYcm?: number;
+  page3ImagesBottomYcm?: number;
 };
 
 export function buildSvgTextParts(
@@ -236,7 +284,11 @@ export function buildSvgTextParts(
 
   if (pageNum === 1) {
     const textCfg = LAYOUT.PAGE1.TEXT as any;
-    const initialBlockLayout = getPage1InitialBlockLayout(textCfg);
+    const initialBlockLayout = getPage1InitialBlockLayout(
+      textCfg,
+      reportFields,
+      svgFontFamily
+    );
 
     // ロゴ画像（固定サイズ：layout.ts の w/h をそのまま使う）
 // ロゴ画像（固定座標＆固定サイズ：layout.ts の x/y/w/h をそのまま使う）
@@ -574,7 +626,7 @@ if (textCfg.HOSPITAL_EMAIL) {
     // 9) Images header 【処置前の肉眼写真等】
     if (textCfg.IMAGES_HEADER) {
       const imgHeaderX = slideOffsetX + textCfg.IMAGES_HEADER.x * pxPerCm;
-      const imgHeaderY = slideOffsetY + (LAYOUT.PAGE1.IMAGES.START_Y - 0.5) * pxPerCm;
+      const imgHeaderY = slideOffsetY + initialBlockLayout.imagesHeaderY * pxPerCm;
       svgParts.push(
         `  <text x="${imgHeaderX}" y="${imgHeaderY}" font-size="${ptToPx(
           LAYOUT.FONTS.SECTION_HEADER
@@ -642,15 +694,20 @@ if (textCfg.HOSPITAL_EMAIL) {
       return visible.length;
     };
 
-    let currentYcm = headerProcCfg?.y ?? bodyProcCfg?.y ?? 0;
+    // PAGE2 auto layout base Y (offsets are applied later in preview pipeline)
+    let layoutCursorYcm = headerProcCfg?.y ?? bodyProcCfg?.y ?? 0;
+    if (typeof options?.page2ImagesBottomYcm === 'number') {
+      layoutCursorYcm = Math.max(layoutCursorYcm, options.page2ImagesBottomYcm + lineHeightCm);
+    }
 
+    const examHeadingBaseYcm = layoutCursorYcm;
     if (headerProcCfg) {
       const hx = slideOffsetX + headerProcCfg.x * pxPerCm;
-      const hy = slideOffsetY + currentYcm * pxPerCm;
+      const hy = slideOffsetY + examHeadingBaseYcm * pxPerCm;
       svgParts.push(
         `  <text x="${hx}" y="${hy}" font-size="${ptToPx(LAYOUT.FONTS.SECTION_HEADER)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【検査・処置内容】</text>`
       );
-      currentYcm += headerProcCfg.h;
+      layoutCursorYcm = examHeadingBaseYcm + headerProcCfg.h;
     }
 
     const reservePostCm = !placePostOnPage3
@@ -658,32 +715,45 @@ if (textCfg.HOSPITAL_EMAIL) {
       : 0;
     const procMaxLines = Math.max(
       0,
-      Math.floor((pageBottomCm - currentYcm - reservePostCm) / lineHeightCm)
+      Math.floor((pageBottomCm - layoutCursorYcm - reservePostCm) / lineHeightCm)
     );
-    const procLines = drawBody(bodyProcCfg, currentYcm, reportFields.procedureText || '', procMaxLines);
-    currentYcm += procLines * lineHeightCm;
+    const examBodyBaseYcm = layoutCursorYcm;
+    const procLines = drawBody(bodyProcCfg, examBodyBaseYcm, reportFields.procedureText || '', procMaxLines);
+    layoutCursorYcm = examBodyBaseYcm + procLines * lineHeightCm;
 
     if (!placePostOnPage3) {
-      currentYcm += lineHeightCm;
+      layoutCursorYcm += lineHeightCm;
 
+      const postHeadingBaseYcm = layoutCursorYcm;
       if (headerPostCfg) {
         const hx = slideOffsetX + headerPostCfg.x * pxPerCm;
-        const hy = slideOffsetY + currentYcm * pxPerCm;
+        const hy = slideOffsetY + postHeadingBaseYcm * pxPerCm;
         svgParts.push(
           `  <text x="${hx}" y="${hy}" font-size="${ptToPx(LAYOUT.FONTS.SECTION_HEADER)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【術後経過】</text>`
         );
-        currentYcm += headerPostCfg.h;
+        layoutCursorYcm = postHeadingBaseYcm + headerPostCfg.h;
       }
 
-      const postMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
-      const postLines = drawBody(bodyPostCfg, currentYcm, reportFields.postText || '', postMaxLines);
-      currentYcm += postLines * lineHeightCm;
+      const postMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
+      const postBodyBaseYcm = layoutCursorYcm;
+      const postLines = drawBody(bodyPostCfg, postBodyBaseYcm, reportFields.postText || '', postMaxLines);
+      layoutCursorYcm = postBodyBaseYcm + postLines * lineHeightCm;
 
       const thankYouBody = getThankYouBody(reportFields);
       if (thankYouBody) {
-        currentYcm += lineHeightCm;
-        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
-        drawBody(bodyPostCfg, currentYcm, thankYouBody, thanksMaxLines);
+        layoutCursorYcm += lineHeightCm;
+        const closingHeadingBaseYcm = layoutCursorYcm;
+        if (headerPostCfg) {
+          const hx = slideOffsetX + headerPostCfg.x * pxPerCm;
+          const hy = slideOffsetY + closingHeadingBaseYcm * pxPerCm;
+          svgParts.push(
+            `  <text x="${hx}" y="${hy}" font-size="${ptToPx(LAYOUT.FONTS.SECTION_HEADER)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【お礼文】</text>`
+          );
+          layoutCursorYcm = closingHeadingBaseYcm + headerPostCfg.h;
+        }
+        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
+        const closingBodyBaseYcm = layoutCursorYcm;
+        drawBody(bodyPostCfg, closingBodyBaseYcm, thankYouBody, thanksMaxLines);
       }
     }
   } else if (pageNum === 3) {
@@ -707,15 +777,29 @@ if (textCfg.HOSPITAL_EMAIL) {
     const page3Body = buildPage3Body(reportFields, options);
 
     if (textCfg?.FREE_TEXT_PAGE3) {
-      const bx = slideOffsetX + textCfg.FREE_TEXT_PAGE3.x * pxPerCm;
-      const by = slideOffsetY + textCfg.FREE_TEXT_PAGE3.y * pxPerCm;
-      const bw = textCfg.FREE_TEXT_PAGE3.w * pxPerCm;
-      const bh = textCfg.FREE_TEXT_PAGE3.h * pxPerCm;
-
       const fontPt = LAYOUT.FONTS.BODY_BASE;
       const fontPx = ptToPx(fontPt);
       const fontFamily = svgFontFamily;
       const lineHeightPx = fontPx * 1.15;
+      const lineHeightCm = lineHeightPx / pxPerCm;
+
+      const defaultPage3StartXcm = 1.04;
+      const defaultPage3StartYcm = 1.9;
+      const bodyStartXcm =
+        typeof options?.page3ImagesBottomYcm === 'number'
+          ? textCfg.FREE_TEXT_PAGE3.x
+          : defaultPage3StartXcm;
+      const bodyStartYcm =
+        typeof options?.page3ImagesBottomYcm === 'number'
+          ? options.page3ImagesBottomYcm + lineHeightCm
+          : defaultPage3StartYcm;
+      const bodyBottomYcm = textCfg.FREE_TEXT_PAGE3.y + textCfg.FREE_TEXT_PAGE3.h;
+      const bodyHeightCm = Math.max(lineHeightCm, bodyBottomYcm - bodyStartYcm);
+
+      const bx = slideOffsetX + bodyStartXcm * pxPerCm;
+      const by = slideOffsetY + bodyStartYcm * pxPerCm;
+      const bw = textCfg.FREE_TEXT_PAGE3.w * pxPerCm;
+      const bh = bodyHeightCm * pxPerCm;
       const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
 
       const ctx = getMeasureContext(fontPx, fontFamily);
@@ -770,7 +854,12 @@ export function addPptxText(
 ) {
   if (pageNum === 1) {
     const textCfg = LAYOUT.PAGE1.TEXT as any;
-    const initialBlockLayout = getPage1InitialBlockLayout(textCfg);
+    const fontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
+    const initialBlockLayout = getPage1InitialBlockLayout(
+      textCfg,
+      reportFields,
+      fontFamily
+    );
 
     // logo image（固定座標＆固定サイズ：layout.ts の x/y/w/h をそのまま使う）
 // ロゴ画像（固定座標＆固定サイズ）
@@ -1070,7 +1159,7 @@ if (textCfg.SEAL) {
     if (textCfg.IMAGES_HEADER) {
       slide.addText('【処置前の肉眼写真等】', {
         x: cmToInch(textCfg.IMAGES_HEADER.x),
-        y: cmToInch(LAYOUT.PAGE1.IMAGES.START_Y - 0.5),
+        y: cmToInch(initialBlockLayout.imagesHeaderY),
         w: cmToInch(textCfg.IMAGES_HEADER.w),
         h: cmToInch(textCfg.IMAGES_HEADER.h),
         fontSize: LAYOUT.FONTS.SECTION_HEADER,
@@ -1125,18 +1214,23 @@ if (textCfg.SEAL) {
       return clampLines(wrapped, maxLines);
     };
 
-    let currentYcm = headerProcCfg?.y ?? bodyProcCfg?.y ?? 0;
+    // PAGE2 auto layout base Y (offsets are applied later in preview pipeline)
+    let layoutCursorYcm = headerProcCfg?.y ?? bodyProcCfg?.y ?? 0;
+    if (typeof options?.page2ImagesBottomYcm === 'number') {
+      layoutCursorYcm = Math.max(layoutCursorYcm, options.page2ImagesBottomYcm + lineHeightCm);
+    }
 
+    const examHeadingBaseYcm = layoutCursorYcm;
     if (headerProcCfg) {
       slide.addText('【検査・処置内容】', {
         x: cmToInch(headerProcCfg.x),
-        y: cmToInch(currentYcm),
+        y: cmToInch(examHeadingBaseYcm),
         w: cmToInch(headerProcCfg.w),
         h: cmToInch(headerProcCfg.h),
         fontSize: LAYOUT.FONTS.SECTION_HEADER,
         bold: true
       });
-      currentYcm += headerProcCfg.h;
+      layoutCursorYcm = examHeadingBaseYcm + headerProcCfg.h;
     }
 
     const reservePostCm = !placePostOnPage3
@@ -1144,13 +1238,14 @@ if (textCfg.SEAL) {
       : 0;
     const procMaxLines = Math.max(
       0,
-      Math.floor((pageBottomCm - currentYcm - reservePostCm) / lineHeightCm)
+      Math.floor((pageBottomCm - layoutCursorYcm - reservePostCm) / lineHeightCm)
     );
+    const examBodyBaseYcm = layoutCursorYcm;
     const procLines = getVisibleBody(bodyProcCfg, reportFields.procedureText || '', procMaxLines);
     if (bodyProcCfg && procLines.length > 0) {
       slide.addText(procLines.join('\n'), {
         x: cmToInch(bodyProcCfg.x),
-        y: cmToInch(currentYcm),
+        y: cmToInch(examBodyBaseYcm),
         w: cmToInch(bodyProcCfg.w),
         h: cmToInch(procLines.length * lineHeightCm),
         fontSize: LAYOUT.FONTS.BODY_BASE,
@@ -1159,29 +1254,31 @@ if (textCfg.SEAL) {
         wrap: true
       });
     }
-    currentYcm += procLines.length * lineHeightCm;
+    layoutCursorYcm = examBodyBaseYcm + procLines.length * lineHeightCm;
 
     if (!placePostOnPage3) {
-      currentYcm += lineHeightCm;
+      layoutCursorYcm += lineHeightCm;
 
+      const postHeadingBaseYcm = layoutCursorYcm;
       if (headerPostCfg) {
         slide.addText('【術後経過】', {
           x: cmToInch(headerPostCfg.x),
-          y: cmToInch(currentYcm),
+          y: cmToInch(postHeadingBaseYcm),
           w: cmToInch(headerPostCfg.w),
           h: cmToInch(headerPostCfg.h),
           fontSize: LAYOUT.FONTS.SECTION_HEADER,
           bold: true
         });
-        currentYcm += headerPostCfg.h;
+        layoutCursorYcm = postHeadingBaseYcm + headerPostCfg.h;
       }
 
-      const postMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
+      const postMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
+      const postBodyBaseYcm = layoutCursorYcm;
       const postLines = getVisibleBody(bodyPostCfg, reportFields.postText || '', postMaxLines);
       if (bodyPostCfg && postLines.length > 0) {
         slide.addText(postLines.join('\n'), {
           x: cmToInch(bodyPostCfg.x),
-          y: cmToInch(currentYcm),
+          y: cmToInch(postBodyBaseYcm),
           w: cmToInch(bodyPostCfg.w),
           h: cmToInch(postLines.length * lineHeightCm),
           fontSize: LAYOUT.FONTS.BODY_BASE,
@@ -1190,17 +1287,30 @@ if (textCfg.SEAL) {
           wrap: true
         });
       }
-      currentYcm += postLines.length * lineHeightCm;
+      layoutCursorYcm = postBodyBaseYcm + postLines.length * lineHeightCm;
 
       const thankYouBody = getThankYouBody(reportFields);
       if (thankYouBody) {
-        currentYcm += lineHeightCm;
-        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - currentYcm) / lineHeightCm));
+        layoutCursorYcm += lineHeightCm;
+        const closingHeadingBaseYcm = layoutCursorYcm;
+        if (headerPostCfg) {
+          slide.addText('【お礼文】', {
+            x: cmToInch(headerPostCfg.x),
+            y: cmToInch(closingHeadingBaseYcm),
+            w: cmToInch(headerPostCfg.w),
+            h: cmToInch(headerPostCfg.h),
+            fontSize: LAYOUT.FONTS.SECTION_HEADER,
+            bold: true
+          });
+          layoutCursorYcm = closingHeadingBaseYcm + headerPostCfg.h;
+        }
+        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
+        const closingBodyBaseYcm = layoutCursorYcm;
         const thankYouLines = getVisibleBody(bodyPostCfg, thankYouBody, thanksMaxLines);
         if (bodyPostCfg && thankYouLines.length > 0) {
           slide.addText(thankYouLines.join('\n'), {
             x: cmToInch(bodyPostCfg.x),
-            y: cmToInch(currentYcm),
+            y: cmToInch(closingBodyBaseYcm),
             w: cmToInch(bodyPostCfg.w),
             h: cmToInch(thankYouLines.length * lineHeightCm),
             fontSize: LAYOUT.FONTS.BODY_BASE,
@@ -1237,12 +1347,36 @@ if (textCfg.SEAL) {
 
     const page3Body = buildPage3Body(reportFields, options);
 
-    const fitSizePage3 = fitTextToBox(page3Body, textCfg.FREE_TEXT_PAGE3, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+    const fontPt = LAYOUT.FONTS.BODY_BASE;
+    const fontPx = ptToPx(fontPt);
+    const lineHeightPx = fontPx * 1.15;
+    const lineHeightCm = (lineHeightPx / 96) * 2.54;
+
+    const defaultPage3StartXcm = 1.04;
+    const defaultPage3StartYcm = 1.9;
+    const bodyStartXcm =
+      typeof options?.page3ImagesBottomYcm === 'number'
+        ? textCfg.FREE_TEXT_PAGE3.x
+        : defaultPage3StartXcm;
+    const bodyStartYcm =
+      typeof options?.page3ImagesBottomYcm === 'number'
+        ? options.page3ImagesBottomYcm + lineHeightCm
+        : defaultPage3StartYcm;
+    const bodyBottomYcm = textCfg.FREE_TEXT_PAGE3.y + textCfg.FREE_TEXT_PAGE3.h;
+    const bodyHeightCm = Math.max(lineHeightCm, bodyBottomYcm - bodyStartYcm);
+    const page3BodyBox = {
+      x: bodyStartXcm,
+      y: bodyStartYcm,
+      w: textCfg.FREE_TEXT_PAGE3.w,
+      h: bodyHeightCm,
+    };
+
+    const fitSizePage3 = fitTextToBox(page3Body, page3BodyBox, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
     slide.addText(page3Body || ' ', {
-      x: cmToInch(textCfg.FREE_TEXT_PAGE3.x),
-      y: cmToInch(textCfg.FREE_TEXT_PAGE3.y),
-      w: cmToInch(textCfg.FREE_TEXT_PAGE3.w),
-      h: cmToInch(textCfg.FREE_TEXT_PAGE3.h),
+      x: cmToInch(page3BodyBox.x),
+      y: cmToInch(page3BodyBox.y),
+      w: cmToInch(page3BodyBox.w),
+      h: cmToInch(page3BodyBox.h),
       fontSize: fitSizePage3,
       align: 'left',
       valign: 'top',

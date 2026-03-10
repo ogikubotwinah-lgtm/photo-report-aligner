@@ -22,10 +22,15 @@ export async function fetchSuggestions(): Promise<Suggestions> {
   return requestJson("/api/suggestions");
 }
 
-export async function addRefHospital(name: string): Promise<void> {
-  if (!name.trim()) return;
+export async function addRefHospital(name: string, email?: string): Promise<void> {
+  const trimmedName = name.trim();
+  if (!trimmedName) return;
+  const trimmedEmail = email?.trim();
   await requestJson("/api/suggestions/ref-hospital", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({
+      name: trimmedName,
+      email: trimmedEmail || undefined,
+    }),
   });
 }

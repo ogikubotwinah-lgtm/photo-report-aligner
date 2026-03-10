@@ -7,7 +7,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { LAYOUT } from './layout';
 import TemplatePicker from './components/TemplatePicker';
-import { buildSvgTextParts, addPptxText } from './reportTextRenderer';
+import { buildSvgTextParts, addPptxText, getPage1ImageStartYcm } from './reportTextRenderer';
 import RowBoard from './components/RowBoard';
 import { fetchSuggestions, addRefHospital } from "./serverApi";
 import { createPortal } from "react-dom";
@@ -17,6 +17,59 @@ type AppSuggestions = {
   refHospitals: string[];
   doctors: string[];
   refHospitalEmails: Record<string, string>;
+};
+
+type PreviewYOffsetKey =
+  | 'page1InitialHeader'
+  | 'page1InitialBody'
+  | 'page2ProcedureTitle'
+  | 'page2ProcedureBody'
+  | 'page2PostTitle'
+  | 'page2PostBody'
+  | 'page2ThanksTitle'
+  | 'page2ThanksBody'
+  | 'page3BodyStart';
+
+type PreviewYOffsetMap = Record<PreviewYOffsetKey, number>;
+
+const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
+  section: 'PAGE1' | 'PAGE2' | 'PAGE3';
+  items: Array<{ key: PreviewYOffsetKey; label: string }>;
+}> = [
+  {
+    section: 'PAGE1',
+    items: [
+      { key: 'page1InitialHeader', label: '【初診時】タイトル' },
+      { key: 'page1InitialBody', label: '【初診時】本文' },
+    ],
+  },
+  {
+    section: 'PAGE2',
+    items: [
+      { key: 'page2ProcedureTitle', label: '【検査・処置内容】タイトル' },
+      { key: 'page2ProcedureBody', label: '【検査・処置内容】本文' },
+      { key: 'page2PostTitle', label: '【術後経過】タイトル' },
+      { key: 'page2PostBody', label: '【術後経過】本文' },
+      { key: 'page2ThanksTitle', label: '【お礼文】タイトル' },
+      { key: 'page2ThanksBody', label: '【お礼文】本文' },
+    ],
+  },
+  {
+    section: 'PAGE3',
+    items: [{ key: 'page3BodyStart', label: '本文開始位置' }],
+  },
+];
+
+const PREVIEW_Y_OFFSET_INITIAL: PreviewYOffsetMap = {
+  page1InitialHeader: 0,
+  page1InitialBody: 0,
+  page2ProcedureTitle: 0,
+  page2ProcedureBody: 0,
+  page2PostTitle: 0,
+  page2PostBody: 0,
+  page2ThanksTitle: 0,
+  page2ThanksBody: 0,
+  page3BodyStart: 0,
 };
 
 const REPORT_FIELDS_STORAGE_KEY = "photo-report-aligner:reportFields";
@@ -61,7 +114,7 @@ function getInitialReportFields() {
     thankYouTextType: 'first-time',
     page3Text: '',
     chiefComplaint: '',
-    page2PhotoCategory: '',
+    page2PhotoCategory: 'treatment-after',
   };
 }
 
@@ -206,12 +259,17 @@ const App: React.FC = () => {
   const [isPageOrderDropdownOpen, setIsPageOrderDropdownOpen] = useState(false);
   const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
+  const thankYouTextTypeDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [isThankYouTextTypeDropdownOpen, setIsThankYouTextTypeDropdownOpen] = useState(false);
 
   // ...この下に既存の state / useEffect / handlers が続く
 
   // ===== 参照病院（候補取得＆保存）=====
   const [refHospitalInput, setRefHospitalInput] = useState<string>("");
   const [refHospitalError, setRefHospitalError] = useState<string | null>(null);
+  const [isSavingRefHospital, setIsSavingRefHospital] = useState(false);
+  const [showHospitalSavedMessage, setShowHospitalSavedMessage] = useState(false);
+  const hospitalSavedMessageTimeoutRef = useRef<number | null>(null);
 
   const [suggestions, setSuggestions] = useState<AppSuggestions>({
     refHospitals: [],
@@ -246,6 +304,26 @@ const App: React.FC = () => {
     return new Set((suggestions.refHospitals || []).map((name) => normalizeHospitalKey(name)));
   }, [suggestions.refHospitals]);
 
+  const normalizedCurrentRefHospitalName = useMemo(
+    () => normalizeHospitalKey(refHospitalInput),
+    [refHospitalInput]
+  );
+
+  const shouldShowRegisterRefHospitalButton = useMemo(() => {
+    if (!normalizedCurrentRefHospitalName) return false;
+    if (normalizedRefHospitalNames.has(normalizedCurrentRefHospitalName)) return false;
+    if (isSavingRefHospital) return false;
+    return true;
+  }, [normalizedCurrentRefHospitalName, normalizedRefHospitalNames, isSavingRefHospital]);
+
+  useEffect(() => {
+    return () => {
+      if (hospitalSavedMessageTimeoutRef.current !== null) {
+        window.clearTimeout(hospitalSavedMessageTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const getThankYouTextTypeByHospital = useCallback((hospitalName: string) => {
     const normalizedName = normalizeHospitalKey(hospitalName);
     return normalizedName && normalizedRefHospitalNames.has(normalizedName) ? 'existing' : 'first-time';
@@ -270,14 +348,19 @@ const App: React.FC = () => {
 
   // 参照病院を保存
   const handleAddRefHospital = useCallback(
-    async (nameArg?: string) => {
+    async (nameArg?: string, emailArg?: string) => {
       const name = (nameArg ?? refHospitalInput).trim();
       if (!name) return;
 
+      if (normalizedRefHospitalNames.has(normalizeHospitalKey(name))) {
+        return;
+      }
+
       setRefHospitalError(null);
+      setIsSavingRefHospital(true);
 
       try {
-        await addRefHospital(name);
+        await addRefHospital(name, emailArg);
 
         // 最新候補を再取得
         const latest = await fetchSuggestions();
@@ -287,14 +370,29 @@ const App: React.FC = () => {
           refHospitalEmails: latest?.refHospitalEmails ?? {},
         });
 
+        setShowHospitalSavedMessage(true);
+        if (hospitalSavedMessageTimeoutRef.current !== null) {
+          window.clearTimeout(hospitalSavedMessageTimeoutRef.current);
+        }
+        hospitalSavedMessageTimeoutRef.current = window.setTimeout(() => {
+          setShowHospitalSavedMessage(false);
+          hospitalSavedMessageTimeoutRef.current = null;
+        }, 2500);
+
         // 入力欄とreportFieldsを正規化して揃える
         applyRefHospitalSelection(name);
       } catch (e) {
         console.error(e);
         setRefHospitalError("保存に失敗しました（CORS/サーバ/URL確認）");
+      } finally {
+        setIsSavingRefHospital(false);
       }
     },
-    [refHospitalInput, applyRefHospitalSelection]
+    [
+      refHospitalInput,
+      applyRefHospitalSelection,
+      normalizedRefHospitalNames,
+    ]
   );
 
   // ===== 画像（ページ別）=====
@@ -312,6 +410,8 @@ const App: React.FC = () => {
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
+  const [previewYOffsets, setPreviewYOffsets] = useState<PreviewYOffsetMap>(PREVIEW_Y_OFFSET_INITIAL);
+  const [isYOffsetOpen, setIsYOffsetOpen] = useState(false);
 
   const page2PhotoCategoryLabel = useMemo(() => {
     if (reportFields.page2PhotoCategory === 'treatment-after') return '【治療時・治療後写真】';
@@ -414,15 +514,16 @@ const App: React.FC = () => {
       };
     }
     const config = LAYOUT.PAGE1.IMAGES;
+    const page1ImageStartY = getPage1ImageStartYcm(reportFields);
     return {
       left: config.LEFT,
       right: config.RIGHT,
-      startY: config.START_Y,
+      startY: page1ImageStartY,
       maxW: LAYOUT.SLIDE.WIDTH_CM - config.LEFT - config.RIGHT,
-      maxH: LAYOUT.SLIDE.HEIGHT_CM - config.START_Y - config.MARGIN_BOTTOM,
+      maxH: LAYOUT.SLIDE.HEIGHT_CM - page1ImageStartY - config.MARGIN_BOTTOM,
       alignLeft: config.ALIGN_LEFT
     };
-  }, []);
+  }, [reportFields]);
 
 
   const [options, setOptions] = useState<LayoutOptions>({
@@ -655,7 +756,10 @@ useEffect(() => {
     return { xCm: clampedX, yCm, wCm: clampedW, hCm: clampedH };
   }, []);
 
-  const calculateSvgDataForPage = useCallback((pageNum: 1 | 2 | 3) => {
+  const calculateSvgDataForPage = useCallback((
+    pageNum: 1 | 2 | 3,
+    renderOpts?: { applyPreviewOffsets?: boolean }
+  ) => {
     const pageImages = allPagesImages[pageNum] ?? [];
     const pageConfirmed = pageImages.filter(img => img.row > 0);
     const pageRows = [1, 2, 3, 4].map(r => pageConfirmed.filter(img => img.row === r));
@@ -673,13 +777,16 @@ useEffect(() => {
 
     // image area offset: only images use the page's IMAGES.LEFT / START_Y
     const imgCfg = pageNum === 1 ? LAYOUT.PAGE1.IMAGES : pageNum === 2 ? LAYOUT.PAGE2.IMAGES : LAYOUT.PAGE3.IMAGES;
+    const imageStartYcm = pageNum === 1 ? getPage1ImageStartYcm(reportFields) : imgCfg.START_Y;
 
     const svgParts: string[] = [];
+    let page2ImagesBottomYcm: number | undefined;
+    let page3ImagesBottomYcm: number | undefined;
 
     rowResults.forEach((row) => {
       row.images.forEach((item: any) => {
         const rawXcm = imgCfg.LEFT + item.x / pxPerCm;
-        const rawYcm = imgCfg.START_Y + item.y / pxPerCm;
+        const rawYcm = imageStartYcm + item.y / pxPerCm;
         const rawWcm = item.w / pxPerCm;
         const rawHcm = item.h / pxPerCm;
 
@@ -692,6 +799,22 @@ useEffect(() => {
         const absY = slideOffsetY + placed.yCm * pxPerCm;
         const renderW = placed.wCm * pxPerCm;
         const renderH = placed.hCm * pxPerCm;
+
+        if (pageNum === 2) {
+          const imageBottomYcm = placed.yCm + placed.hCm;
+          page2ImagesBottomYcm =
+            page2ImagesBottomYcm === undefined
+              ? imageBottomYcm
+              : Math.max(page2ImagesBottomYcm, imageBottomYcm);
+        }
+
+        if (pageNum === 3) {
+          const imageBottomYcm = placed.yCm + placed.hCm;
+          page3ImagesBottomYcm =
+            page3ImagesBottomYcm === undefined
+              ? imageBottomYcm
+              : Math.max(page3ImagesBottomYcm, imageBottomYcm);
+        }
 
         const cx = absX + renderW / 2;
         const cy = absY + renderH / 2;
@@ -712,10 +835,115 @@ useEffect(() => {
     });
 
     // use shared helper to render all text portions so that SVG and PPTX stay in sync
-    svgParts.push(...buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
+    let textParts = buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
       showPage3,
       postPlacement,
-    }));
+      page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
+      page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
+    });
+
+    const offsetTextY = (part: string, deltaPx: number): string => {
+      if (!deltaPx || !part.includes('<text')) return part;
+      return part.replace(/ y="([^"]+)"/, (_m, yStr: string) => {
+        const baseY = Number(yStr);
+        if (!Number.isFinite(baseY)) return _m;
+        return ` y="${baseY + deltaPx}"`;
+      });
+    };
+
+    const getTextX = (part: string): number | null => {
+      const match = part.match(/<text[^>]* x="([^"]+)"/);
+      if (!match) return null;
+      const x = Number(match[1]);
+      return Number.isFinite(x) ? x : null;
+    };
+
+    const nearlyEqual = (a: number, b: number) => Math.abs(a - b) < 0.1;
+
+    if (renderOpts?.applyPreviewOffsets) {
+      if (pageNum === 1) {
+        const headerDelta = previewYOffsets.page1InitialHeader * pxPerCm;
+        const bodyDelta = previewYOffsets.page1InitialBody * pxPerCm;
+        const bodyX = slideOffsetX + LAYOUT.PAGE1.TEXT.FREE_TEXT_INITIAL.x * pxPerCm;
+
+        let bodyOffsetApplied = false;
+        textParts = textParts.map((part) => {
+          if (headerDelta && part.includes('【初診時】')) {
+            return offsetTextY(part, headerDelta);
+          }
+
+          if (!bodyOffsetApplied && bodyDelta && part.includes('<tspan') && !part.includes('【')) {
+            const x = getTextX(part);
+            if (x !== null && nearlyEqual(x, bodyX)) {
+              bodyOffsetApplied = true;
+              return offsetTextY(part, bodyDelta);
+            }
+          }
+
+          return part;
+        });
+      }
+
+      if (pageNum === 2) {
+        const procTitleDelta = previewYOffsets.page2ProcedureTitle * pxPerCm;
+        const procDelta = previewYOffsets.page2ProcedureBody * pxPerCm;
+        const postTitleDelta = previewYOffsets.page2PostTitle * pxPerCm;
+        const postDelta = previewYOffsets.page2PostBody * pxPerCm;
+        const thanksTitleDelta = previewYOffsets.page2ThanksTitle * pxPerCm;
+        const thanksDelta = previewYOffsets.page2ThanksBody * pxPerCm;
+
+        let pendingBody: 'procedure' | 'post' | 'thanks' | null = null;
+
+        textParts = textParts.map((part) => {
+          if (part.includes('【検査・処置内容】')) {
+            pendingBody = 'procedure';
+            return procTitleDelta ? offsetTextY(part, procTitleDelta) : part;
+          }
+          if (part.includes('【術後経過】')) {
+            pendingBody = 'post';
+            return postTitleDelta ? offsetTextY(part, postTitleDelta) : part;
+          }
+          if (part.includes('【お礼文】')) {
+            pendingBody = 'thanks';
+            return thanksTitleDelta ? offsetTextY(part, thanksTitleDelta) : part;
+          }
+
+          if (pendingBody && part.includes('<text') && part.includes('<tspan') && !part.includes('【')) {
+            const delta =
+              pendingBody === 'procedure'
+                ? procDelta
+                : pendingBody === 'post'
+                  ? postDelta
+                  : thanksDelta;
+            pendingBody = null;
+            return delta ? offsetTextY(part, delta) : part;
+          }
+
+          return part;
+        });
+      }
+
+      if (pageNum === 3) {
+        const bodyStartDelta = previewYOffsets.page3BodyStart * pxPerCm;
+        const bodyStartXDefault = slideOffsetX + 1.04 * pxPerCm;
+        const bodyStartXFromLayout = slideOffsetX + LAYOUT.PAGE3.TEXT.FREE_TEXT_PAGE3.x * pxPerCm;
+
+        let bodyStartOffsetApplied = false;
+        textParts = textParts.map((part) => {
+          if (bodyStartOffsetApplied || !bodyStartDelta) return part;
+          if (!part.includes('<text') || !part.includes('<tspan')) return part;
+
+          const x = getTextX(part);
+          if (x === null) return part;
+          if (!nearlyEqual(x, bodyStartXDefault) && !nearlyEqual(x, bodyStartXFromLayout)) return part;
+
+          bodyStartOffsetApplied = true;
+          return offsetTextY(part, bodyStartDelta);
+        });
+      }
+    }
+
+    svgParts.push(...textParts);
 
     if (pageNum === 2 && page2PhotoCategoryLabel) {
       const labelX = slideOffsetX + 1.04 * pxPerCm;
@@ -748,7 +976,8 @@ ${svgParts.join('\n')}
     reportFields,
     page2PhotoCategoryLabel,
     showPage3,
-    postPlacement
+    postPlacement,
+    previewYOffsets
   ]);
 
 
@@ -895,6 +1124,9 @@ ${doctor} 先生
         const pageDisplayRows = [1, 2, 3, 4].map(r => imagesData.filter(img => img.row === r));
         const { rowResults } = calculateLayoutForAnyPage(pageDisplayRows, pageNum);
 
+        let page2ImagesBottomYcm: number | undefined;
+        let page3ImagesBottomYcm: number | undefined;
+
         rowResults.forEach(row => {
           row.images.forEach((item: any) => {
             const rawXcm = pageDims.left + item.x * cmPerPx;
@@ -915,12 +1147,30 @@ ${doctor} 先生
               h: placed.hCm / 2.54,
               rotate: item.img.rotation,
             });
+
+            if (pageNum === 2) {
+              const imageBottomYcm = placed.yCm + placed.hCm;
+              page2ImagesBottomYcm =
+                page2ImagesBottomYcm === undefined
+                  ? imageBottomYcm
+                  : Math.max(page2ImagesBottomYcm, imageBottomYcm);
+            }
+
+            if (pageNum === 3) {
+              const imageBottomYcm = placed.yCm + placed.hCm;
+              page3ImagesBottomYcm =
+                page3ImagesBottomYcm === undefined
+                  ? imageBottomYcm
+                  : Math.max(page3ImagesBottomYcm, imageBottomYcm);
+            }
           });
         });
 
         addPptxText(slide, pageNum, reportFields, {
           showPage3,
           postPlacement,
+          page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
+          page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
         });
 
         if (pageNum === 2 && page2PhotoCategoryLabel) {
@@ -983,7 +1233,23 @@ ${doctor} 先生
     return currentPage as 1 | 2 | 3;
   }, [showPage3, currentPage]);
 
-  const svgData = useMemo(() => calculateSvgDataForPage(previewPage), [calculateSvgDataForPage, previewPage]);
+  const activePreviewYOffsetGroup = useMemo(() => {
+    const section = `PAGE${previewPage}` as 'PAGE1' | 'PAGE2' | 'PAGE3';
+    return PREVIEW_Y_OFFSET_UI_GROUPS.find((group) => group.section === section) ?? PREVIEW_Y_OFFSET_UI_GROUPS[0];
+  }, [previewPage]);
+
+  const resetCurrentPagePreviewYOffsets = useCallback(() => {
+    const targetKeys = Array.from(new Set(activePreviewYOffsetGroup.items.map((item) => item.key)));
+    setPreviewYOffsets((prev) => {
+      const next = { ...prev };
+      targetKeys.forEach((key) => {
+        next[key] = 0;
+      });
+      return next;
+    });
+  }, [activePreviewYOffsetGroup]);
+
+  const svgData = useMemo(() => calculateSvgDataForPage(previewPage, { applyPreviewOffsets: true }), [calculateSvgDataForPage, previewPage]);
   const svgPage1 = useMemo(() => calculateSvgDataForPage(1).svgCode, [calculateSvgDataForPage]);
   const svgPage2 = useMemo(() => calculateSvgDataForPage(2).svgCode, [calculateSvgDataForPage]);
   const svgPage3 = useMemo(() => calculateSvgDataForPage(3).svgCode, [calculateSvgDataForPage]);
@@ -1153,6 +1419,25 @@ ${doctor} 先生
     };
   }, [isPageOrderDropdownOpen]);
 
+  useEffect(() => {
+    if (!isThankYouTextTypeDropdownOpen) return;
+
+    const closeWhenOutside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (thankYouTextTypeDropdownRef.current?.contains(target)) return;
+      setIsThankYouTextTypeDropdownOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeWhenOutside, true);
+    document.addEventListener('focusin', closeWhenOutside, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside, true);
+      document.removeEventListener('focusin', closeWhenOutside, true);
+    };
+  }, [isThankYouTextTypeDropdownOpen]);
+
   const calendarFirstDay = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1).getDay();
   const calendarDaysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
   const calendarCells: Array<number | null> = [
@@ -1296,7 +1581,6 @@ ${doctor} 先生
                           const normalizedName = normalizeHospitalKey(v);
                           const hasMappedEmail = normalizedName ? !!normalizedRefHospitalEmails[normalizedName] : false;
                           applyRefHospitalSelection(v);
-                          handleAddRefHospital(v);
                           if (hasMappedEmail) {
                             e.stopPropagation();
                             requestAnimationFrame(() => {
@@ -1315,6 +1599,21 @@ ${doctor} 先生
                         <option key={h} value={h} />
                       ))}
                     </datalist>
+
+                    {shouldShowRegisterRefHospitalButton && (
+                      <button
+                        type="button"
+                        onClick={() => handleAddRefHospital(refHospitalInput, reportFields.refHospitalEmail)}
+                        className="text-sm px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors"
+                        disabled={isSavingRefHospital}
+                      >
+                        {isSavingRefHospital ? '登録中...' : 'この病院を登録'}
+                      </button>
+                    )}
+
+                    {showHospitalSavedMessage && (
+                      <div className="text-sm text-emerald-600 mt-1">登録しました</div>
+                    )}
 
                     {/* 保存エラー（任意表示） */}
                     {refHospitalError && (
@@ -1701,6 +2000,7 @@ ${doctor} 先生
               <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
                 <div className="text-lg font-semibold text-slate-800 tracking-tight">報告内容</div>
               </div>
+
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
@@ -1777,14 +2077,49 @@ ${doctor} 先生
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】本文 (Page 2)</label>
-                <select
-                  className="w-full h-11 border border-slate-200 rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
-                  value={reportFields.thankYouTextType || 'first-time'}
-                  onChange={(e) => setReportFields(v => ({ ...v, thankYouTextType: e.target.value }))}
-                >
-                  <option value="existing">① 既存紹介先向け</option>
-                  <option value="first-time">② 初回紹介先向け</option>
-                </select>
+                <div className="relative" ref={thankYouTextTypeDropdownRef}>
+                  <button
+                    type="button"
+                    className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
+                    aria-haspopup="listbox"
+                    aria-expanded={isThankYouTextTypeDropdownOpen}
+                    onClick={() => setIsThankYouTextTypeDropdownOpen(v => !v)}
+                  >
+                    <span className={reportFields.thankYouTextType ? 'text-slate-900' : 'text-slate-500'}>
+                      {reportFields.thankYouTextType === 'existing'
+                        ? '① 既存紹介先向け'
+                        : '② 初回紹介先向け'}
+                    </span>
+                  </button>
+
+                  {isThankYouTextTypeDropdownOpen && (
+                    <ul
+                      role="listbox"
+                      className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                    >
+                      {[
+                        { value: 'existing', label: '① 既存紹介先向け' },
+                        { value: 'first-time', label: '② 初回紹介先向け' },
+                      ].map((item) => {
+                        const isSelected = (reportFields.thankYouTextType || 'first-time') === item.value;
+                        return (
+                          <li key={item.value}>
+                            <button
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                              onClick={() => {
+                                setReportFields(v => ({ ...v, thankYouTextType: item.value }));
+                                setIsThankYouTextTypeDropdownOpen(false);
+                              }}
+                            >
+                              {item.label}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               </div>
               {showPage3 && (
                 <div className="space-y-1">
@@ -2013,6 +2348,55 @@ ${doctor} 先生
                 dangerouslySetInnerHTML={{ __html: svgData.svgCode }}
               />
             </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-12">
+          <div className="max-w-xl mx-auto">
+            <button
+              type="button"
+              onClick={() => setIsYOffsetOpen((prev) => !prev)}
+              className="flex items-center justify-between w-full text-left px-4 py-3 rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+              <span className="text-sm font-semibold text-slate-700">Yオフセット調整（{activePreviewYOffsetGroup.section}）</span>
+              <span className="text-slate-500 text-sm">{isYOffsetOpen ? '▲' : '▼'}</span>
+            </button>
+            {isYOffsetOpen && (
+              <div className="mt-2 rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-semibold text-slate-700">Yオフセット項目</div>
+                  <button
+                    type="button"
+                    onClick={resetCurrentPagePreviewYOffsets}
+                    className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
+                  >
+                    このページをリセット
+                  </button>
+                </div>
+                <div>
+                  {activePreviewYOffsetGroup.items.map((item, idx) => (
+                    <label key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 mb-2 last:mb-0">
+                      <span className="text-sm text-slate-700">{item.label}</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-20 h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm text-right focus:ring-2 focus:ring-orange-500 outline-none"
+                        value={previewYOffsets[item.key]}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const next = raw === '' ? 0 : Number(raw);
+                          setPreviewYOffsets((prev) => ({
+                            ...prev,
+                            [item.key]: Number.isFinite(next) ? next : 0,
+                          }));
+                        }}
+                      />
+                      <span className="text-sm text-slate-500">cm</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </main>
