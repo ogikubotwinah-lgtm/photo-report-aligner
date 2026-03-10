@@ -60,6 +60,7 @@ function getInitialReportFields() {
     postText: '',
     page3Text: '',
     chiefComplaint: '',
+    page2PhotoCategory: '',
   };
 }
 
@@ -179,8 +180,7 @@ const App: React.FC = () => {
 
   const [reportFieldsHydrated, setReportFieldsHydrated] = useState(false);
 
-  // PageSwitcher には常に PAGE1-3 を表示
-  const availablePages = useMemo<number[]>(() => [1, 2, 3], []);
+  const availablePages = useMemo<number[]>(() => (showPage3 ? [1, 2, 3] : [1, 2]), [showPage3]);
 
   const handlePageChange = useCallback((page: number) => {
     if (page === 3 && !showPage3) {
@@ -197,6 +197,10 @@ const App: React.FC = () => {
   // 既存：参照や他state
   const rowBoardRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attendingVetDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [isAttendingVetDropdownOpen, setIsAttendingVetDropdownOpen] = useState(false);
+  const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
 
   // ...この下に既存の state / useEffect / handlers が続く
 
@@ -292,6 +296,12 @@ const App: React.FC = () => {
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
+
+  const page2PhotoCategoryLabel = useMemo(() => {
+    if (reportFields.page2PhotoCategory === 'treatment-after') return '【治療時・治療後写真】';
+    if (reportFields.page2PhotoCategory === 'inspection') return '【検査時写真】';
+    return '';
+  }, [reportFields.page2PhotoCategory]);
 
   useEffect(() => {
     const initial = getInitialReportFields();
@@ -691,6 +701,15 @@ useEffect(() => {
       postPlacement,
     }));
 
+    if (pageNum === 2 && page2PhotoCategoryLabel) {
+      const labelX = slideOffsetX + 1.04 * pxPerCm;
+      const labelY = slideOffsetY + 1.9 * pxPerCm;
+      const labelFontSize = 0.42 * pxPerCm;
+      svgParts.push(
+        `  <text x="${labelX}" y="${labelY}" font-size="${labelFontSize}" font-weight="700" fill="#0f172a" dominant-baseline="hanging">${page2PhotoCategoryLabel}</text>`
+      );
+    }
+
     const svgCode = `
 <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${fullSlideW} ${fullSlideH}">
   <rect width="100%" height="100%" fill="${options.backgroundColor}" />
@@ -706,6 +725,7 @@ ${svgParts.join('\n')}
     options.containerWidth,
     getPageDimensions,
     reportFields,
+    page2PhotoCategoryLabel,
     showPage3,
     postPlacement
   ]);
@@ -881,6 +901,19 @@ ${doctor} 先生
           showPage3,
           postPlacement,
         });
+
+        if (pageNum === 2 && page2PhotoCategoryLabel) {
+          slide.addText(page2PhotoCategoryLabel, {
+            x: 1.04 / 2.54,
+            y: 1.9 / 2.54,
+            w: 8.0 / 2.54,
+            h: 0.6 / 2.54,
+            fontFace: 'Meiryo',
+            fontSize: 13,
+            bold: true,
+            color: '0F172A',
+          });
+        }
       };
 
       outputPages.forEach(pageNum => {
@@ -921,7 +954,12 @@ ${doctor} 先生
     }
   };
 
-  const svgData = useMemo(() => calculateSvgDataForPage(currentPage as 1 | 2 | 3), [calculateSvgDataForPage, currentPage]);
+  const previewPage = useMemo<1 | 2 | 3>(() => {
+    if (!showPage3 && currentPage === 3) return 2;
+    return currentPage as 1 | 2 | 3;
+  }, [showPage3, currentPage]);
+
+  const svgData = useMemo(() => calculateSvgDataForPage(previewPage), [calculateSvgDataForPage, previewPage]);
   const svgPage1 = useMemo(() => calculateSvgDataForPage(1).svgCode, [calculateSvgDataForPage]);
   const svgPage2 = useMemo(() => calculateSvgDataForPage(2).svgCode, [calculateSvgDataForPage]);
   const svgPage3 = useMemo(() => calculateSvgDataForPage(3).svgCode, [calculateSvgDataForPage]);
@@ -1015,6 +1053,44 @@ ${doctor} 先生
     };
   }, [openDateField]);
 
+  useEffect(() => {
+    if (!isAttendingVetDropdownOpen) return;
+
+    const closeWhenOutside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (attendingVetDropdownRef.current?.contains(target)) return;
+      setIsAttendingVetDropdownOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeWhenOutside, true);
+    document.addEventListener('focusin', closeWhenOutside, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside, true);
+      document.removeEventListener('focusin', closeWhenOutside, true);
+    };
+  }, [isAttendingVetDropdownOpen]);
+
+  useEffect(() => {
+    if (!isPostPlacementDropdownOpen) return;
+
+    const closeWhenOutside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (postPlacementDropdownRef.current?.contains(target)) return;
+      setIsPostPlacementDropdownOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeWhenOutside, true);
+    document.addEventListener('focusin', closeWhenOutside, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside, true);
+      document.removeEventListener('focusin', closeWhenOutside, true);
+    };
+  }, [isPostPlacementDropdownOpen]);
+
   const calendarFirstDay = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1).getDay();
   const calendarDaysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
   const calendarCells: Array<number | null> = [
@@ -1041,8 +1117,8 @@ ${doctor} 先生
   const getEmptyFieldToneClass = useCallback((value: unknown) => {
     const isEmpty = String(value ?? '').trim() === '';
     return isEmpty
-      ? 'bg-amber-50/40 border-amber-100'
-      : 'bg-white border-slate-200';
+      ? 'bg-emerald-50/50 border-emerald-100 text-slate-800'
+      : 'bg-white border-slate-200 text-slate-900';
   }, []);
 
   const handleEnterFocusNextInput = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
@@ -1108,26 +1184,26 @@ ${doctor} 先生
 
       <main className="max-w-7xl mx-auto px-6 mt-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* 報告書データ入力フォーム */}
-        <div className="lg:col-span-12 bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-6" onKeyDown={handleEnterFocusNextInput}>
+        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5 space-y-4" onKeyDown={handleEnterFocusNextInput}>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="font-black text-slate-800 text-base mb-1">報告書データ入力</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">現在の段落配置が自動で反映されます</p>
+              <h3 className="font-semibold text-slate-700 text-base mb-3">報告書データ入力</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">現在の段落配置が自動で反映されます</p>
             </div>
             <button
               type="button"
               onClick={handleClearReportFields}
-              className="h-8 px-3 rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               入力をクリア
             </button>
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* 基本情報グリッド */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5">
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">報告日</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">報告日</label>
                 <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.reportDate)}`}
                   placeholder="2026年2月16日"
                   value={reportFields.reportDate}
@@ -1136,7 +1212,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">
                   紹介病院名
                 </label>
 
@@ -1180,7 +1256,7 @@ ${doctor} 先生
                 )}
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">紹介病院メール（Gmail）</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">紹介病院メール（Gmail）</label>
                 <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail)}`}
                   placeholder="example@gmail.com"
                   value={reportFields.refHospitalEmail}
@@ -1195,7 +1271,7 @@ ${doctor} 先生
                   )}
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">先生名</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">先生名</label>
                 <div className="relative">
                   <input className={`w-full border rounded-xl px-3 pr-12 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refDoctor)}`}
                     id="ref-doctor-input"
@@ -1207,7 +1283,7 @@ ${doctor} 先生
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">飼い主姓</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">飼い主姓</label>
                 <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.ownerLastName)}`}
                   placeholder="山田"
                   value={reportFields.ownerLastName}
@@ -1215,7 +1291,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">ペット名</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">ペット名</label>
                 <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.petName)}`}
                   placeholder="タロウ"
                   value={reportFields.petName}
@@ -1223,7 +1299,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">初診日</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
                 <div className="relative" data-date-field="firstVisitDate">
                   <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)}`}
                     placeholder="202X年XX月XX日"
@@ -1275,7 +1351,7 @@ ${doctor} 先生
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">鎮静日</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
                 <div className="relative" data-date-field="sedationDate">
                   <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)}`}
                     placeholder="202X年XX月XX日"
@@ -1327,7 +1403,7 @@ ${doctor} 先生
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">全身麻酔日</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
                 <div className="relative" data-date-field="anesthesiaDate">
                   <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)}`}
                     placeholder="202X年XX月XX日"
@@ -1380,22 +1456,50 @@ ${doctor} 先生
               </div>
               {/* 担当獣医師（新規：プルダウン） */}
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">担当獣医師</label>
-                <select className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.attendingVet)}`}
-                  value={reportFields.attendingVet}
-                  onChange={e => setReportFields(v => ({ ...v, attendingVet: e.target.value }))}
-                >
-                  <option value="">選択してください</option>
-                  <option value="町田健吾">町田健吾</option>
-                  <option value="江成翔馬">江成翔馬</option>
-                  <option value="神田珠希">神田珠希</option>
-                  <option value="小林嵩">小林嵩</option>
-                  <option value="金田七海">金田七海</option>
-                </select>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">担当獣医師</label>
+                <div className="relative" ref={attendingVetDropdownRef}>
+                  <button
+                    type="button"
+                    className={`w-full border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.attendingVet)}`}
+                    aria-haspopup="listbox"
+                    aria-expanded={isAttendingVetDropdownOpen}
+                    onClick={() => setIsAttendingVetDropdownOpen(v => !v)}
+                  >
+                    <span className={reportFields.attendingVet ? 'text-slate-900' : 'text-slate-500'}>
+                      {reportFields.attendingVet || '選択してください'}
+                    </span>
+                  </button>
+
+                  {isAttendingVetDropdownOpen && (
+                    <ul
+                      role="listbox"
+                      className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                    >
+                      {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name) => {
+                        const label = name || '選択してください';
+                        const isSelected = reportFields.attendingVet === name;
+                        return (
+                          <li key={label}>
+                            <button
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                              onClick={() => {
+                                setReportFields(v => ({ ...v, attendingVet: name }));
+                                setIsAttendingVetDropdownOpen(false);
+                              }}
+                            >
+                              {label}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
               </div>
               {/* 主訴（新規：テキスト入力） */}
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">主訴</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">主訴</label>
                 <input className={`w-full border rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.chiefComplaint)}`}
                   id="chief-complaint-input"
                   placeholder="主な症状や主訴"
@@ -1403,12 +1507,24 @@ ${doctor} 先生
                   onChange={e => setReportFields(v => ({ ...v, chiefComplaint: e.target.value }))}
                 />
               </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">PAGE2写真区分ラベル</label>
+                <select
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900"
+                  value={reportFields.page2PhotoCategory}
+                  onChange={e => setReportFields(v => ({ ...v, page2PhotoCategory: e.target.value }))}
+                >
+                  <option value="">空欄</option>
+                  <option value="treatment-after">治療時・治療後写真</option>
+                  <option value="inspection">検査時写真</option>
+                </select>
+              </div>
             </div>
 
             <div className={`h-px bg-slate-200 transition-all duration-200 ${dateDividerOffsetClass}`} />
 
             {/* PAGE3設定 */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5">
               <label className="flex items-center gap-2 text-sm text-slate-700 font-semibold">
                 <input
                   type="checkbox"
@@ -1420,9 +1536,9 @@ ${doctor} 先生
 
               {showPage3 && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">出力順（PAGE2/PAGE3）</label>
+                  <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">出力順（PAGE2/PAGE3）</label>
                   <select
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                     value={pageOrderMode}
                     onChange={e => setPageOrderMode(e.target.value as 'page2-page3' | 'page3-page2')}
                   >
@@ -1434,23 +1550,54 @@ ${doctor} 先生
 
               {showPage3 && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">術後経過の配置</label>
-                  <select
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 outline-none transition-all"
-                    value={postPlacement}
-                    onChange={e => setPostPlacement(e.target.value as 'page2' | 'page3')}
-                  >
-                    <option value="page2">PAGE2に置く</option>
-                    <option value="page3">PAGE3に移す</option>
-                  </select>
+                  <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">術後経過の配置</label>
+                  <div className="relative" ref={postPlacementDropdownRef}>
+                    <button
+                      type="button"
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900"
+                      aria-haspopup="listbox"
+                      aria-expanded={isPostPlacementDropdownOpen}
+                      onClick={() => setIsPostPlacementDropdownOpen(v => !v)}
+                    >
+                      {postPlacement === 'page3' ? 'PAGE3に移す' : 'PAGE2に置く'}
+                    </button>
+
+                    {isPostPlacementDropdownOpen && (
+                      <ul
+                        role="listbox"
+                        className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                      >
+                        {[
+                          { value: 'page2' as const, label: 'PAGE2に置く' },
+                          { value: 'page3' as const, label: 'PAGE3に移す' },
+                        ].map((option) => {
+                          const isSelected = postPlacement === option.value;
+                          return (
+                            <li key={option.value}>
+                              <button
+                                type="button"
+                                className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                                onClick={() => {
+                                  setPostPlacement(option.value);
+                                  setIsPostPlacementDropdownOpen(false);
+                                }}
+                              >
+                                {option.label}
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
 
             {/* 自由記載エリア */}
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5">
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   id="initial-textarea"
                   placeholder="初診時の所見など..."
@@ -1459,7 +1606,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="実施した検査や処置の詳細..."
                   value={reportFields.procedureText}
@@ -1467,7 +1614,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【術後経過】本文 ({showPage3 && postPlacement === 'page3' ? 'Page 3' : 'Page 2'})</label>
+                <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">【術後経過】本文 ({showPage3 && postPlacement === 'page3' ? 'Page 3' : 'Page 2'})</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                   placeholder="術後の状態や今後の予定..."
                   value={reportFields.postText}
@@ -1476,7 +1623,7 @@ ${doctor} 先生
               </div>
               {showPage3 && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">【PAGE3】自由入力</label>
+                  <label className="text-[10px] font-semibold text-slate-700 uppercase tracking-widest">【PAGE3】自由入力</label>
                   <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all"
                     placeholder="PAGE3に出す補足テキスト..."
                     value={reportFields.page3Text || ''}
@@ -1553,9 +1700,9 @@ ${doctor} 先生
 
             <div className="w-full max-w-5xl mx-auto bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden space-y-8 relative">
               <section>
-                <div className="mb-6 flex justify-between items-start">
+                <div className="mb-4 flex items-center gap-3 flex-wrap justify-between">
                   <div>
-                    <h3 className="font-black text-slate-800 text-base mb-1">Page {currentPage} - STEP1:画像編集・段落選択</h3>
+                    <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold shadow-sm bg-orange-50 border-orange-200 text-orange-700">Page {currentPage} - STEP1:画像編集・段落選択</h3>
                   </div>
                   {history.length > 0 && (
                     <button onClick={handleUndo} className="px-3 py-1.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-orange-50 hover:text-orange-600 transition-all border border-slate-200 flex items-center gap-1.5 shadow-sm active:scale-95">
@@ -1664,8 +1811,8 @@ ${doctor} 先生
 
         {/* 段落ドラッグ移動 */}
         <div ref={rowBoardRef} className="lg:col-span-12 bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-4">
-          <div>
-            <h3 className="font-black text-slate-800 text-base mb-1">
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold shadow-sm bg-sky-50 border-sky-200 text-sky-700">
               {isCurrentPageConfirmed ? `Page ${currentPage} - STEP2:画像入替` : '段落ドラッグ移動'}
             </h3>
           </div>
@@ -1728,24 +1875,24 @@ ${doctor} 先生
       <div className="sticky bottom-0 z-50 bg-white/90 backdrop-blur border-t border-slate-200 p-3">
     <div className="max-w-7xl mx-auto flex items-center justify-between px-6">
       <div>
-        <h3 className="font-black text-slate-800 text-base">プレビュー</h3>
-        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">確定済みの画像が反映されます</p>
+        <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-sm font-semibold shadow-sm bg-emerald-50 border-emerald-200 text-emerald-700 mb-4">STEP3: プレビュー</h3>
+        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">確定済みの画像が反映されます</p>
         {pptxStatus && <p className="text-[11px] text-slate-600 font-bold mt-1">{pptxStatus}</p>}
       </div>
       <div className="flex flex-wrap gap-3">
         <button onClick={openGmailDraft}
           disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
           title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
-          className="bg-slate-800 text-white border border-slate-700 px-5 py-2 rounded-xl text-[10px] font-black hover:bg-slate-700 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-[10px] font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isCreatingDraft ? "作成中…" : "PDF / Gmail"}
         </button>
         <button onClick={printPdf}
           title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
-          className="bg-slate-800 text-white border border-slate-700 px-5 py-2 rounded-xl text-[10px] font-black hover:bg-slate-700 transition-all flex items-center gap-2">
+          className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 text-[10px] flex items-center gap-2">
           PDF 印刷
         </button>
         <button onClick={downloadPptx} disabled={isSavingPptx}
-          className="bg-orange-600 text-white px-5 py-2 rounded-xl text-[10px] font-black hover:bg-orange-700 shadow-xl shadow-orange-900/20 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-[10px] font-semibold hover:bg-slate-200 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
           {isSavingPptx ? '保存中…' : 'PPTX出力/編集'}
         </button>
       </div>
