@@ -5,6 +5,25 @@ svg text {
 	font-family: Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif;
 }
 
+body {
+	font-size: 18px;
+	line-height: 1.6;
+}
+
+input,
+textarea,
+select {
+	font-size: 16px;
+}
+
+button {
+	font-size: 16px;
+}
+
+label {
+	font-size: 16px;
+}
+
 @media print {
 	@page {
 		size: A4 portrait;

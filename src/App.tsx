@@ -129,33 +129,6 @@ function normalizeHospitalKey(name: string): string {
     .replace(/\s+/g, ' ');
 }
 
-// Minimal date normalizer used by onBlur handlers in this file.
-function normalizeJapaneseDate(input: string): string {
-  if (!input) return input;
-  const s = String(input).trim();
-
-  if (s.includes('年')) return s;
-
-  const onlyDigits = s.replace(/\D+/g, '');
-
-  if (onlyDigits.length === 8) {
-    const y = onlyDigits.slice(0, 4);
-    const m = onlyDigits.slice(4, 6);
-    const d = onlyDigits.slice(6, 8);
-    return `${y}年${m}月${d}日`;
-  }
-
-  const match = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/);
-  if (match) {
-    const y = match[1];
-    const mm = match[2].padStart(2, '0');
-    const dd = match[3].padStart(2, '0');
-    return `${y}年${mm}月${dd}日`;
-  }
-
-  return s;
-}
-
 type PageSwitcherProps = {
   currentPage: number;
   onChange: (page: number) => void;
@@ -263,6 +236,11 @@ const App: React.FC = () => {
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
   const thankYouTextTypeDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isThankYouTextTypeDropdownOpen, setIsThankYouTextTypeDropdownOpen] = useState(false);
+  const [dropdownHighlight, setDropdownHighlight] = useState(-1);
+  const shouldOpenAttendingVetOnFocusRef = useRef(false);
+  const shouldOpenPostPlacementOnFocusRef = useRef(false);
+  const shouldOpenPage2PhotoCategoryOnFocusRef = useRef(false);
+  const shouldOpenThankYouTextTypeOnFocusRef = useRef(false);
 
   // ...この下に既存の state / useEffect / handlers が続く
 
@@ -1281,7 +1259,7 @@ ${doctor} 先生
   const svgPage2 = useMemo(() => calculateSvgDataForPage(2).svgCode, [calculateSvgDataForPage]);
   const svgPage3 = useMemo(() => calculateSvgDataForPage(3).svgCode, [calculateSvgDataForPage]);
 
-  type DateFieldKey = 'firstVisitDate' | 'sedationDate' | 'anesthesiaDate';
+  type DateFieldKey = 'reportDate' | 'firstVisitDate' | 'sedationDate' | 'anesthesiaDate';
 
   const [openDateField, setOpenDateField] = useState<DateFieldKey | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(
@@ -1350,6 +1328,40 @@ ${doctor} 先生
   const moveCalendarMonth = useCallback((offset: number) => {
     setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
   }, []);
+
+  const focusAndScroll = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    el.focus();
+    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  }, []);
+
+  const focusNextAfterRefHospitalSelection = useCallback((hospitalName: string) => {
+    const normalizedName = normalizeHospitalKey(hospitalName);
+    const selected = {
+      email: normalizedName ? (normalizedRefHospitalEmails[normalizedName] ?? '') : '',
+    };
+    const nextEmail = selected.email ?? '';
+    const nextTargetId = nextEmail.trim() ? 'ref-doctor-input' : 'ref-hospital-email';
+    requestAnimationFrame(() => focusAndScroll(document.getElementById(nextTargetId)));
+  }, [normalizedRefHospitalEmails, focusAndScroll]);
+
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent, itemCount: number, onSelect: (index: number) => void, onClose: () => void) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setDropdownHighlight(prev => (prev + 1) % itemCount);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setDropdownHighlight(prev => (prev - 1 + itemCount) % itemCount);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (dropdownHighlight >= 0 && dropdownHighlight < itemCount) {
+        onSelect(dropdownHighlight);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    }
+  }, [dropdownHighlight]);
 
   useEffect(() => {
     if (!openDateField) return;
@@ -1493,7 +1505,7 @@ ${doctor} 先生
       if (inputEl.id === 'chief-complaint-input') {
         e.preventDefault();
         const initialTextArea = document.getElementById('initial-textarea') as HTMLTextAreaElement | null;
-        initialTextArea?.focus();
+        focusAndScroll(initialTextArea);
         return;
       }
     }
@@ -1508,9 +1520,9 @@ ${doctor} 先生
     );
     const idx = focusables.indexOf(target);
     if (idx >= 0 && idx < focusables.length - 1) {
-      focusables[idx + 1].focus();
+      focusAndScroll(focusables[idx + 1]);
     }
-  }, []);
+  }, [focusAndScroll]);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 font-sans">
@@ -1547,13 +1559,54 @@ ${doctor} 先生
             </div>
             <div className="flex items-center gap-3">
               <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest whitespace-nowrap">報告日</label>
-              <div className="w-48">
-                <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.reportDate)} bg-white`}
-                  placeholder="2026年2月16日"
+              <div className="w-48 relative" data-date-field="reportDate">
+                <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.reportDate)} bg-white`}
+                  placeholder="202X年XX月XX日"
                   value={reportFields.reportDate}
-                  onChange={e => setReportFields(v => ({ ...v, reportDate: e.target.value }))}
-                  onBlur={e => setReportFields(v => ({ ...v, reportDate: normalizeJapaneseDate(e.target.value) }))}
+                  readOnly
+                  onClick={() => openCalendar('reportDate')}
                 />
+                {openDateField === 'reportDate' && (
+                  <div className="absolute right-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                      <div className="flex items-center gap-1">
+                        <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                        <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                      </div>
+                    </div>
+                    <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                      {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                    </div>
+                    <div className="grid grid-cols-7 gap-1">
+                      {calendarCells.map((day, idx) => {
+                        if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                        const isSelected = !!selectedCalendarDate
+                          && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                          && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                          && selectedCalendarDate.getDate() === day;
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => selectCalendarDate(day)}
+                            className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                              isSelected
+                                ? 'bg-orange-500 text-white'
+                                : 'text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {day}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex justify-between">
+                      <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                      <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                    </div>
+                  </div>
+                )}
               </div>
               <button
                 type="button"
@@ -1581,21 +1634,26 @@ ${doctor} 先生
                       className={`w-full max-w-[520px] h-11 px-3 py-2 rounded-xl border text-base ${getEmptyFieldToneClass(refHospitalInput)} bg-white`}
                       placeholder="例：中川動物病院"
                       value={refHospitalInput}
-                      onChange={(e) => applyRefHospitalSelection(e.target.value)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        applyRefHospitalSelection(v);
+                        const norm = normalizeHospitalKey(v);
+                        if (norm && normalizedRefHospitalNames.has(norm)) {
+                          focusNextAfterRefHospitalSelection(v);
+                        }
+                      }}
                       onBlur={(e) => applyRefHospitalSelection(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
                           const v = e.currentTarget.value;
-                          const normalizedName = normalizeHospitalKey(v);
-                          const hasMappedEmail = normalizedName ? !!normalizedRefHospitalEmails[normalizedName] : false;
+                          const norm = normalizeHospitalKey(v);
+                          const isKnown = norm ? normalizedRefHospitalNames.has(norm) : false;
                           applyRefHospitalSelection(v);
-                          if (hasMappedEmail) {
-                            e.stopPropagation();
-                            requestAnimationFrame(() => {
-                              const doctorInput = document.getElementById('ref-doctor-input') as HTMLInputElement | null;
-                              doctorInput?.focus();
-                            });
+                          if (isKnown) {
+                            focusNextAfterRefHospitalSelection(v);
+                          } else {
+                            requestAnimationFrame(() => focusAndScroll(document.getElementById('ref-hospital-email')));
                           }
                         }
                       }}
@@ -1630,8 +1688,8 @@ ${doctor} 先生
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">紹介病院メール（Gmail）</label>
-                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail)} bg-white`}
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">紹介病院メールアドレス</label>
+                    <input id="ref-hospital-email" className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail)} bg-white`}
                       placeholder="example@gmail.com"
                       value={reportFields.refHospitalEmail}
                       onChange={e => setReportFields(v => ({ ...v, refHospitalEmail: e.target.value }))}
@@ -1675,6 +1733,16 @@ ${doctor} 先生
                       placeholder="タロウ"
                       value={reportFields.petName}
                       onChange={e => setReportFields(v => ({ ...v, petName: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Tab' && !e.shiftKey) {
+                          shouldOpenAttendingVetOnFocusRef.current = true;
+                        }
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          shouldOpenAttendingVetOnFocusRef.current = true;
+                          requestAnimationFrame(() => focusAndScroll(document.getElementById('attending-vet-btn')));
+                        }
+                      }}
                     />
                   </div>
                   {/* 担当獣医師（新規：プルダウン） */}
@@ -1682,11 +1750,27 @@ ${doctor} 先生
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">担当獣医師</label>
                     <div className="relative" ref={attendingVetDropdownRef}>
                       <button
+                        id="attending-vet-btn"
                         type="button"
                         className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.attendingVet)} bg-white`}
                         aria-haspopup="listbox"
                         aria-expanded={isAttendingVetDropdownOpen}
-                        onClick={() => setIsAttendingVetDropdownOpen(v => !v)}
+                        onFocus={() => {
+                          if (!shouldOpenAttendingVetOnFocusRef.current) return;
+                          shouldOpenAttendingVetOnFocusRef.current = false;
+                          setIsAttendingVetDropdownOpen(true);
+                          setDropdownHighlight(0);
+                        }}
+                        onClick={() => { setIsAttendingVetDropdownOpen(v => !v); setDropdownHighlight(-1); }}
+                        onKeyDown={isAttendingVetDropdownOpen ? (e) => {
+                          const items = ['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
+                          handleDropdownKeyDown(e, items.length, (idx) => {
+                            const name = items[idx];
+                            setReportFields(v => ({ ...v, attendingVet: name }));
+                            setIsAttendingVetDropdownOpen(false);
+                            if (name) requestAnimationFrame(() => openCalendar('firstVisitDate'));
+                          }, () => setIsAttendingVetDropdownOpen(false));
+                        } : undefined}
                       >
                         <span className={reportFields.attendingVet ? 'text-slate-900' : 'text-slate-500'}>
                           {reportFields.attendingVet || '選択してください'}
@@ -1698,17 +1782,21 @@ ${doctor} 先生
                           role="listbox"
                           className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
                         >
-                          {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name) => {
+                          {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
                             const label = name || '選択してください';
                             const isSelected = reportFields.attendingVet === name;
+                            const isHighlighted = dropdownHighlight === idx;
                             return (
                               <li key={label}>
                                 <button
                                   type="button"
-                                  className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                                  className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
                                   onClick={() => {
                                     setReportFields(v => ({ ...v, attendingVet: name }));
                                     setIsAttendingVetDropdownOpen(false);
+                                    if (name) {
+                                      requestAnimationFrame(() => openCalendar('firstVisitDate'));
+                                    }
                                   }}
                                 >
                                   {label}
@@ -1757,7 +1845,7 @@ ${doctor} 先生
                             <button
                               key={day}
                               type="button"
-                              onClick={() => selectCalendarDate(day)}
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('sedationDate')); }}
                               className={`h-8 rounded-lg text-base font-medium transition-colors ${
                                 isSelected
                                   ? 'bg-orange-500 text-white'
@@ -1809,7 +1897,7 @@ ${doctor} 先生
                             <button
                               key={day}
                               type="button"
-                              onClick={() => selectCalendarDate(day)}
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('anesthesiaDate')); }}
                               className={`h-8 rounded-lg text-base font-medium transition-colors ${
                                 isSelected
                                   ? 'bg-orange-500 text-white'
@@ -1861,7 +1949,7 @@ ${doctor} 先生
                             <button
                               key={day}
                               type="button"
-                              onClick={() => selectCalendarDate(day)}
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => focusAndScroll(document.getElementById('chief-complaint-input'))); }}
                               className={`h-8 rounded-lg text-base font-medium transition-colors ${
                                 isSelected
                                   ? 'bg-orange-500 text-white'
@@ -1919,6 +2007,11 @@ ${doctor} 先生
                     type="checkbox"
                     className="bg-white"
                     checked={includePage2InExport}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Tab' && !e.shiftKey) {
+                        shouldOpenPostPlacementOnFocusRef.current = true;
+                      }
+                    }}
                     onChange={e => setIncludePage2InExport(e.target.checked)}
                   />
                   PAGE2を出力に含める
@@ -1934,7 +2027,20 @@ ${doctor} 先生
                       className="w-full h-11 border border-slate-200 rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900 flex items-center"
                       aria-haspopup="listbox"
                       aria-expanded={isPostPlacementDropdownOpen}
-                      onClick={() => setIsPostPlacementDropdownOpen(v => !v)}
+                      onFocus={() => {
+                        if (!shouldOpenPostPlacementOnFocusRef.current) return;
+                        shouldOpenPostPlacementOnFocusRef.current = false;
+                        setIsPostPlacementDropdownOpen(true);
+                        setDropdownHighlight(0);
+                      }}
+                      onClick={() => { setIsPostPlacementDropdownOpen(v => !v); setDropdownHighlight(-1); }}
+                      onKeyDown={isPostPlacementDropdownOpen ? (e) => {
+                        const items = [{ value: 'page2' }, { value: 'page3' }];
+                        handleDropdownKeyDown(e, items.length, (idx) => {
+                          setPostPlacement(items[idx].value as 'page2' | 'page3');
+                          setIsPostPlacementDropdownOpen(false);
+                        }, () => setIsPostPlacementDropdownOpen(false));
+                      } : undefined}
                     >
                       {postPlacement === 'page3' ? 'PAGE3に移す' : 'PAGE2に置く'}
                     </button>
@@ -1947,13 +2053,14 @@ ${doctor} 先生
                         {[
                           { value: 'page2', label: 'PAGE2に置く' },
                           { value: 'page3', label: 'PAGE3に移す' },
-                        ].map((item) => {
+                        ].map((item, idx) => {
                           const isSelected = postPlacement === item.value;
+                          const isHighlighted = dropdownHighlight === idx;
                           return (
                             <li key={`${item.value}-${item.label}`}>
                               <button
                                 type="button"
-                                className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                                className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
                                 onClick={() => {
                                   setPostPlacement(item.value as 'page2' | 'page3');
                                   setIsPostPlacementDropdownOpen(false);
@@ -1983,6 +2090,11 @@ ${doctor} 先生
                   id="initial-textarea"
                   placeholder="初診時の所見など..."
                   value={reportFields.initialText}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      shouldOpenPage2PhotoCategoryOnFocusRef.current = true;
+                    }
+                  }}
                   onChange={e => setReportFields(v => ({ ...v, initialText: e.target.value }))}
                 />
               </div>
@@ -1994,7 +2106,20 @@ ${doctor} 先生
                     className="w-full h-11 border border-slate-200 rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900 flex items-center"
                     aria-haspopup="listbox"
                     aria-expanded={isPage2PhotoCategoryDropdownOpen}
-                    onClick={() => setIsPage2PhotoCategoryDropdownOpen(v => !v)}
+                    onFocus={() => {
+                      if (!shouldOpenPage2PhotoCategoryOnFocusRef.current) return;
+                      shouldOpenPage2PhotoCategoryOnFocusRef.current = false;
+                      setIsPage2PhotoCategoryDropdownOpen(true);
+                      setDropdownHighlight(0);
+                    }}
+                    onClick={() => { setIsPage2PhotoCategoryDropdownOpen(v => !v); setDropdownHighlight(-1); }}
+                    onKeyDown={isPage2PhotoCategoryDropdownOpen ? (e) => {
+                      const items = [{ value: '' }, { value: 'treatment-after' }, { value: 'inspection' }];
+                      handleDropdownKeyDown(e, items.length, (idx) => {
+                        setReportFields(v => ({ ...v, page2PhotoCategory: items[idx].value }));
+                        setIsPage2PhotoCategoryDropdownOpen(false);
+                      }, () => setIsPage2PhotoCategoryDropdownOpen(false));
+                    } : undefined}
                   >
                     <span className={reportFields.page2PhotoCategory ? 'text-slate-900' : 'text-slate-500'}>
                       {reportFields.page2PhotoCategory === 'treatment-after'
@@ -2014,13 +2139,14 @@ ${doctor} 先生
                         { value: '', label: '空欄' },
                         { value: 'treatment-after', label: '治療時・治療後写真' },
                         { value: 'inspection', label: '検査時写真' },
-                      ].map((item) => {
+                      ].map((item, idx) => {
                         const isSelected = reportFields.page2PhotoCategory === item.value;
+                        const isHighlighted = dropdownHighlight === idx;
                         return (
                           <li key={`${item.value || 'empty'}-${item.label}`}>
                             <button
                               type="button"
-                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
                               onClick={() => {
                                 setReportFields(v => ({ ...v, page2PhotoCategory: item.value }));
                                 setIsPage2PhotoCategoryDropdownOpen(false);
@@ -2048,6 +2174,11 @@ ${doctor} 先生
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   placeholder="術後の状態や今後の予定..."
                   value={reportFields.postText}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      shouldOpenThankYouTextTypeOnFocusRef.current = true;
+                    }
+                  }}
                   onChange={e => setReportFields(v => ({ ...v, postText: e.target.value }))}
                 />
               </div>
@@ -2059,7 +2190,20 @@ ${doctor} 先生
                     className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
                     aria-haspopup="listbox"
                     aria-expanded={isThankYouTextTypeDropdownOpen}
-                    onClick={() => setIsThankYouTextTypeDropdownOpen(v => !v)}
+                    onFocus={() => {
+                      if (!shouldOpenThankYouTextTypeOnFocusRef.current) return;
+                      shouldOpenThankYouTextTypeOnFocusRef.current = false;
+                      setIsThankYouTextTypeDropdownOpen(true);
+                      setDropdownHighlight(0);
+                    }}
+                    onClick={() => { setIsThankYouTextTypeDropdownOpen(v => !v); setDropdownHighlight(-1); }}
+                    onKeyDown={isThankYouTextTypeDropdownOpen ? (e) => {
+                      const items = [{ value: 'existing' }, { value: 'first-time' }];
+                      handleDropdownKeyDown(e, items.length, (idx) => {
+                        setReportFields(v => ({ ...v, thankYouTextType: items[idx].value }));
+                        setIsThankYouTextTypeDropdownOpen(false);
+                      }, () => setIsThankYouTextTypeDropdownOpen(false));
+                    } : undefined}
                   >
                     <span className={reportFields.thankYouTextType ? 'text-slate-900' : 'text-slate-500'}>
                       {reportFields.thankYouTextType === 'existing'
@@ -2076,13 +2220,14 @@ ${doctor} 先生
                       {[
                         { value: 'existing', label: '① 既存紹介先向け' },
                         { value: 'first-time', label: '② 初回紹介先向け' },
-                      ].map((item) => {
+                      ].map((item, idx) => {
                         const isSelected = (reportFields.thankYouTextType || 'first-time') === item.value;
+                        const isHighlighted = dropdownHighlight === idx;
                         return (
                           <li key={item.value}>
                             <button
                               type="button"
-                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
                               onClick={() => {
                                 setReportFields(v => ({ ...v, thankYouTextType: item.value }));
                                 setIsThankYouTextTypeDropdownOpen(false);
@@ -2098,18 +2243,22 @@ ${doctor} 先生
                 </div>
               </div>
               {showPage3 && (
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE3写真ラベル（自由入力）</label>
-                  <div className="relative w-full">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-base text-slate-400 font-medium select-none pointer-events-none">【</span>
+                <div className="bg-slate-50 p-3 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE3写真ラベル</label>
+                    <span className="text-xs text-slate-400">（自由入力）</span>
+                  </div>
+                  <div className="inline-flex items-center h-11 max-w-md rounded-xl border border-slate-200 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-orange-500 transition-all">
+                    <span className="pl-3 pr-0.5 text-slate-700 text-base font-medium shrink-0 select-none">【</span>
                     <input
                       type="text"
-                      className="w-full h-11 border border-slate-200 rounded-xl bg-white text-base pl-8 pr-8 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all"
-                      placeholder="例: 術後口腔内写真"
+                      size={Math.max(((reportFields as any).page3PhotoLabel || '').length + 1, 10)}
+                      className="border-0 outline-none bg-transparent text-base px-0 h-full min-w-[10ch] max-w-[30ch] placeholder:text-slate-400"
+                      placeholder="術後口腔内写真"
                       value={(reportFields as any).page3PhotoLabel || ''}
                       onChange={e => setReportFields(v => ({ ...v, page3PhotoLabel: e.target.value }))}
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-base text-slate-400 font-medium select-none pointer-events-none">】</span>
+                    <span className="pl-0.5 pr-3 text-slate-700 text-base font-medium shrink-0 select-none">】</span>
                   </div>
                 </div>
               )}
@@ -2194,12 +2343,12 @@ ${doctor} 先生
               <section>
                 <div className="mb-4 flex items-center gap-3 flex-wrap justify-between">
                   <div>
-                    <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-base font-semibold shadow-sm bg-orange-50 border-orange-200 text-orange-700">Page {currentPage} - STEP1:画像編集・段落選択</h3>
+                    <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-lg font-semibold shadow-sm bg-orange-50 border-orange-200 text-orange-700">画像編集・段落選択（Page {currentPage}）</h3>
                   </div>
                   {history.length > 0 && (
                     <button onClick={handleUndo} className="px-3 py-1.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-orange-50 hover:text-orange-600 transition-all border border-slate-200 flex items-center gap-1.5 shadow-sm active:scale-95">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
-                      <span className="text-xs font-black uppercase tracking-widest">戻す</span>
+                      <span className="text-sm font-black uppercase tracking-widest">戻す</span>
                     </button>
                   )}
                 </div>
@@ -2304,8 +2453,8 @@ ${doctor} 先生
         {/* 段落ドラッグ移動 */}
         <div ref={rowBoardRef} className="lg:col-span-12 bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-4">
           <div className="flex items-center gap-3 mb-4 flex-wrap">
-            <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-base font-semibold shadow-sm bg-sky-50 border-sky-200 text-sky-700">
-              {isCurrentPageConfirmed ? `Page ${currentPage} - STEP2:画像入替` : '段落ドラッグ移動'}
+            <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-lg font-semibold shadow-sm bg-sky-50 border-sky-200 text-sky-700">
+              {isCurrentPageConfirmed ? `画像入れ替え（Page ${currentPage}）` : '段落ドラッグ移動'}
             </h3>
           </div>
           <RowBoard images={images} setImages={setImages} rows={4} />
@@ -2350,17 +2499,17 @@ ${doctor} 先生
               onClick={() => setIsYOffsetOpen((prev) => !prev)}
               className="flex items-center justify-between w-full text-left px-4 py-3 rounded-2xl border border-slate-200 bg-white shadow-sm"
             >
-              <span className="text-sm font-semibold text-slate-700">Yオフセット調整（{activePreviewYOffsetGroup.section}）</span>
-              <span className="text-slate-500 text-sm">{isYOffsetOpen ? '▲' : '▼'}</span>
+              <span className="text-base font-semibold text-slate-700">Yオフセット調整（{activePreviewYOffsetGroup.section}）</span>
+              <span className="text-slate-500 text-base">{isYOffsetOpen ? '▲' : '▼'}</span>
             </button>
             {isYOffsetOpen && (
               <div className="mt-2 rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm font-semibold text-slate-700">Yオフセット項目</div>
+                  <div className="text-base font-semibold text-slate-700">Yオフセット項目</div>
                   <button
                     type="button"
                     onClick={resetCurrentPagePreviewYOffsets}
-                    className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
+                    className="text-base px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
                   >
                     このページをリセット
                   </button>
@@ -2368,11 +2517,11 @@ ${doctor} 先生
                 <div>
                   {activePreviewYOffsetGroup.items.map((item, idx) => (
                     <label key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 mb-2 last:mb-0">
-                      <span className="text-sm text-slate-700">{item.label}</span>
+                      <span className="text-base text-slate-700">{item.label}</span>
                       <input
                         type="number"
                         step="0.01"
-                        className="w-20 h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm text-right focus:ring-2 focus:ring-orange-500 outline-none"
+                        className="w-20 h-10 rounded-lg border border-slate-200 bg-white px-2 text-base text-right focus:ring-2 focus:ring-orange-500 outline-none"
                         value={previewYOffsets[item.key]}
                         onChange={(e) => {
                           const raw = e.target.value;
@@ -2383,7 +2532,7 @@ ${doctor} 先生
                           }));
                         }}
                       />
-                      <span className="text-sm text-slate-500">cm</span>
+                      <span className="text-base text-slate-500">cm</span>
                     </label>
                   ))}
                 </div>
@@ -2416,24 +2565,24 @@ ${doctor} 先生
       <div className="sticky bottom-0 z-50 bg-white/90 backdrop-blur border-t border-slate-200 p-3">
     <div className="max-w-7xl mx-auto flex items-center justify-between px-6">
       <div>
-        <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-base font-semibold shadow-sm bg-emerald-50 border-emerald-200 text-emerald-700 mb-4">STEP3: プレビュー</h3>
-        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">確定済みの画像が反映されます</p>
-        {pptxStatus && <p className="text-sm text-slate-600 font-bold mt-1">{pptxStatus}</p>}
+        <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-lg font-semibold shadow-sm bg-emerald-50 border-emerald-200 text-emerald-700 mb-4">プレビュー</h3>
+        <p className="text-sm text-slate-500 font-bold uppercase tracking-wider">確定済みの画像が反映されます</p>
+        {pptxStatus && <p className="text-base text-slate-600 font-bold mt-1">{pptxStatus}</p>}
       </div>
       <div className="flex flex-wrap gap-3">
         <button onClick={openGmailDraft}
           disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
           title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
-          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isCreatingDraft ? "作成中…" : "PDF / Gmail"}
         </button>
         <button onClick={printPdf}
           title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
-          className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 text-xs flex items-center gap-2">
+          className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm flex items-center gap-2">
           PDF 印刷
         </button>
         <button onClick={downloadPptx} disabled={isSavingPptx}
-          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-semibold hover:bg-slate-200 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-200 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
           {isSavingPptx ? '保存中…' : 'PPTX出力/編集'}
         </button>
       </div>
