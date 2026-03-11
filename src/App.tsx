@@ -28,6 +28,7 @@ type PreviewYOffsetKey =
   | 'page2PostBody'
   | 'page2ThanksTitle'
   | 'page2ThanksBody'
+  | 'page2PhotoCategoryTitle'
   | 'page3BodyStart';
 
 type PreviewYOffsetMap = Record<PreviewYOffsetKey, number>;
@@ -52,6 +53,7 @@ const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
       { key: 'page2PostBody', label: '【術後経過】本文' },
       { key: 'page2ThanksTitle', label: '【お礼文】タイトル' },
       { key: 'page2ThanksBody', label: '【お礼文】本文' },
+      { key: 'page2PhotoCategoryTitle', label: 'PAGE2 写真区分ラベル タイトル' },
     ],
   },
   {
@@ -69,6 +71,7 @@ const PREVIEW_Y_OFFSET_INITIAL: PreviewYOffsetMap = {
   page2PostBody: 0,
   page2ThanksTitle: 0,
   page2ThanksBody: 0,
+  page2PhotoCategoryTitle: 0,
   page3BodyStart: 0,
 };
 
@@ -115,6 +118,7 @@ function getInitialReportFields() {
     page3Text: '',
     chiefComplaint: '',
     page2PhotoCategory: 'treatment-after',
+    page3PhotoLabel: '',
   };
 }
 
@@ -255,8 +259,6 @@ const App: React.FC = () => {
   const [isAttendingVetDropdownOpen, setIsAttendingVetDropdownOpen] = useState(false);
   const page2PhotoCategoryDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isPage2PhotoCategoryDropdownOpen, setIsPage2PhotoCategoryDropdownOpen] = useState(false);
-  const pageOrderDropdownRef = useRef<HTMLDivElement | null>(null);
-  const [isPageOrderDropdownOpen, setIsPageOrderDropdownOpen] = useState(false);
   const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
   const thankYouTextTypeDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -419,6 +421,12 @@ const App: React.FC = () => {
     return '';
   }, [reportFields.page2PhotoCategory]);
 
+  const page3PhotoLabelText = useMemo(() => {
+    const label = String((reportFields as any).page3PhotoLabel || '').trim();
+    if (!label) return '';
+    return `【${label}】`;
+  }, [(reportFields as any).page3PhotoLabel]);
+
   useEffect(() => {
     const initial = getInitialReportFields();
     if (typeof window === "undefined") {
@@ -549,8 +557,8 @@ const [page1Confirmed, setPage1Confirmed] = useState(false);
 const [page2Confirmed, setPage2Confirmed] = useState(false);
 const [page3Confirmed, setPage3Confirmed] = useState(false);
 
-// ページ順モード（あなたの既存仕様に合わせて）
-const [pageOrderMode, setPageOrderMode] = useState<"page2-page3" | "page3-page2">("page2-page3");
+// PAGE2を出力に含めるか（PAGE3追加時のみ有効）
+const [includePage2InExport, setIncludePage2InExport] = useState(true);
 
 // どこに「経過」を入れるか（既存がこれならOK）
 const [postPlacement, setPostPlacement] = useState<"page2" | "page3">("page2");
@@ -559,8 +567,8 @@ const [postPlacement, setPostPlacement] = useState<"page2" | "page3">("page2");
 // 出力順（PDF/PPTXの並びなどで使う想定）
 const outputPages = useMemo<number[]>(() => {
   if (!showPage3) return [1, 2];
-  return pageOrderMode === "page2-page3" ? [1, 2, 3] : [1, 3, 2];
-}, [showPage3, pageOrderMode]);
+  return includePage2InExport ? [1, 2, 3] : [1, 3];
+}, [showPage3, includePage2InExport]);
 
 // 今いるページが確定済みか
 const isCurrentPageConfirmed =
@@ -946,16 +954,21 @@ useEffect(() => {
     svgParts.push(...textParts);
 
     if (pageNum === 2 && page2PhotoCategoryLabel) {
-      const labelX = slideOffsetX + 1.04 * pxPerCm;
-      const labelY =
-        slideOffsetY +
-        Math.max(
-          LAYOUT.PAGE2.LINES.SEP_TOP.y + 0.3,
-          LAYOUT.PAGE2.TEXT.SECTION_HEADER_PROCEDURE.y - 0.6
-        ) * pxPerCm;
+      const labelX = slideOffsetX + 1.0 * pxPerCm;
+      const labelBaseY = slideOffsetY + (LAYOUT.PAGE2.LINES.SEP_TOP.y + 0.3) * pxPerCm;
+      const labelY = labelBaseY + previewYOffsets.page2PhotoCategoryTitle * pxPerCm;
       const labelFontSize = 0.42 * pxPerCm;
       svgParts.push(
         `  <text x="${labelX}" y="${labelY}" font-size="${labelFontSize}" font-weight="700" fill="#0f172a" dominant-baseline="hanging">${page2PhotoCategoryLabel}</text>`
+      );
+    }
+
+    if (pageNum === 3 && page3PhotoLabelText && page3ImagesBottomYcm !== undefined) {
+      const labelX = slideOffsetX + 1.0 * pxPerCm;
+      const labelY = slideOffsetY + (LAYOUT.PAGE3.LINES.SEP_TOP.y + 0.3) * pxPerCm;
+      const labelFontSize = 0.42 * pxPerCm;
+      svgParts.push(
+        `  <text x="${labelX}" y="${labelY}" font-size="${labelFontSize}" font-weight="700" fill="#0f172a" dominant-baseline="hanging">${page3PhotoLabelText}</text>`
       );
     }
 
@@ -975,6 +988,7 @@ ${svgParts.join('\n')}
     getPageDimensions,
     reportFields,
     page2PhotoCategoryLabel,
+    page3PhotoLabelText,
     showPage3,
     postPlacement,
     previewYOffsets
@@ -1180,6 +1194,19 @@ ${doctor} 先生
               LAYOUT.PAGE2.LINES.SEP_TOP.y + 0.3,
               LAYOUT.PAGE2.TEXT.SECTION_HEADER_PROCEDURE.y - 0.6
             ) / 2.54,
+            w: 8.0 / 2.54,
+            h: 0.6 / 2.54,
+            fontFace: 'Meiryo',
+            fontSize: 13,
+            bold: true,
+            color: '0F172A',
+          });
+        }
+
+        if (pageNum === 3 && page3PhotoLabelText && imagesData.length > 0) {
+          slide.addText(page3PhotoLabelText, {
+            x: 1.04 / 2.54,
+            y: (LAYOUT.PAGE3.LINES.SEP_TOP.y + 0.3) / 2.54,
             w: 8.0 / 2.54,
             h: 0.6 / 2.54,
             fontFace: 'Meiryo',
@@ -1400,24 +1427,6 @@ ${doctor} 先生
     };
   }, [isPostPlacementDropdownOpen]);
 
-  useEffect(() => {
-    if (!isPageOrderDropdownOpen) return;
-
-    const closeWhenOutside = (event: Event) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (pageOrderDropdownRef.current?.contains(target)) return;
-      setIsPageOrderDropdownOpen(false);
-    };
-
-    document.addEventListener('pointerdown', closeWhenOutside, true);
-    document.addEventListener('focusin', closeWhenOutside, true);
-
-    return () => {
-      document.removeEventListener('pointerdown', closeWhenOutside, true);
-      document.removeEventListener('focusin', closeWhenOutside, true);
-    };
-  }, [isPageOrderDropdownOpen]);
 
   useEffect(() => {
     if (!isThankYouTextTypeDropdownOpen) return;
@@ -1905,48 +1914,15 @@ ${doctor} 先生
               </label>
 
               {showPage3 && (
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">出力順（PAGE2/PAGE3）</label>
-                  <div className="relative" ref={pageOrderDropdownRef}>
-                    <button
-                      type="button"
-                      className="w-full h-11 border border-slate-200 rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white text-slate-900 flex items-center"
-                      aria-haspopup="listbox"
-                      aria-expanded={isPageOrderDropdownOpen}
-                      onClick={() => setIsPageOrderDropdownOpen(v => !v)}
-                    >
-                      {pageOrderMode === 'page3-page2' ? 'PAGE3 → PAGE2' : 'PAGE2 → PAGE3'}
-                    </button>
-
-                    {isPageOrderDropdownOpen && (
-                      <ul
-                        role="listbox"
-                        className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
-                      >
-                        {[
-                          { value: 'page2-page3', label: 'PAGE2 → PAGE3' },
-                          { value: 'page3-page2', label: 'PAGE3 → PAGE2' },
-                        ].map((item) => {
-                          const isSelected = pageOrderMode === item.value;
-                          return (
-                            <li key={`${item.value}-${item.label}`}>
-                              <button
-                                type="button"
-                                className={`w-full px-3 py-2 text-left text-base transition-colors ${isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
-                                onClick={() => {
-                                  setPageOrderMode(item.value as 'page2-page3' | 'page3-page2');
-                                  setIsPageOrderDropdownOpen(false);
-                                }}
-                              >
-                                {item.label}
-                              </button>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                </div>
+                <label className="flex items-center gap-2 text-base text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="bg-white"
+                    checked={includePage2InExport}
+                    onChange={e => setIncludePage2InExport(e.target.checked)}
+                  />
+                  PAGE2を出力に含める
+                </label>
               )}
 
               {showPage3 && (
@@ -2121,6 +2097,22 @@ ${doctor} 先生
                   )}
                 </div>
               </div>
+              {showPage3 && (
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE3写真ラベル（自由入力）</label>
+                  <div className="relative w-full">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-base text-slate-400 font-medium select-none pointer-events-none">【</span>
+                    <input
+                      type="text"
+                      className="w-full h-11 border border-slate-200 rounded-xl bg-white text-base pl-8 pr-8 py-2 focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+                      placeholder="例: 術後口腔内写真"
+                      value={(reportFields as any).page3PhotoLabel || ''}
+                      onChange={e => setReportFields(v => ({ ...v, page3PhotoLabel: e.target.value }))}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-base text-slate-400 font-medium select-none pointer-events-none">】</span>
+                  </div>
+                </div>
+              )}
               {showPage3 && (
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【PAGE3】自由入力</label>

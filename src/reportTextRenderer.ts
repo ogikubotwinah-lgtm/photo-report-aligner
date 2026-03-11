@@ -105,13 +105,17 @@ function buildPage3Body(reportFields: ReportFields, options?: RenderOptions) {
       ? formatSection('術後経過', reportFields.postText || '')
       : '';
 
-  if (page3FreeText && postSection) {
-    return `${page3FreeText}\n\n${postSection}`;
+  const parts: string[] = [];
+  if (page3FreeText) parts.push(page3FreeText);
+  if (postSection) parts.push(postSection);
+
+  // お礼文を最終ページ（PAGE3）に追加（5行空けはテキスト内の空行で表現）
+  const thankYou = getThankYouBody(reportFields);
+  if (thankYou) {
+    parts.push('\n\n\n\n' + thankYou);
   }
-  if (page3FreeText) {
-    return `${page3FreeText}\n`;
-  }
-  return postSection;
+
+  return parts.join('\n\n');
 }
 
 function getThankYouBody(reportFields: ReportFields) {
@@ -739,21 +743,22 @@ if (textCfg.HOSPITAL_EMAIL) {
       const postLines = drawBody(bodyPostCfg, postBodyBaseYcm, reportFields.postText || '', postMaxLines);
       layoutCursorYcm = postBodyBaseYcm + postLines * lineHeightCm;
 
-      const thankYouBody = getThankYouBody(reportFields);
-      if (thankYouBody) {
-        layoutCursorYcm += lineHeightCm;
-        const closingHeadingBaseYcm = layoutCursorYcm;
-        if (headerPostCfg) {
-          const hx = slideOffsetX + headerPostCfg.x * pxPerCm;
-          const hy = slideOffsetY + closingHeadingBaseYcm * pxPerCm;
-          svgParts.push(
-            `  <text x="${hx}" y="${hy}" font-size="${ptToPx(LAYOUT.FONTS.SECTION_HEADER)}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【お礼文】</text>`
-          );
-          layoutCursorYcm = closingHeadingBaseYcm + headerPostCfg.h;
+      // PAGE3が有効ならお礼文はPAGE3側に出すためスキップ
+      if (!options?.showPage3) {
+        const thankYouBody = getThankYouBody(reportFields);
+        if (thankYouBody) {
+          // 5行空けを試み、スペース不足なら最低2行まで縮める
+          const headingH = headerPostCfg?.h ?? 0;
+          let gapLines = 5;
+          while (gapLines > 2 && layoutCursorYcm + gapLines * lineHeightCm + headingH > pageBottomCm) {
+            gapLines--;
+          }
+          layoutCursorYcm += gapLines * lineHeightCm;
+
+          const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
+          const closingBodyBaseYcm = layoutCursorYcm;
+          drawBody(bodyPostCfg, closingBodyBaseYcm, thankYouBody, thanksMaxLines);
         }
-        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
-        const closingBodyBaseYcm = layoutCursorYcm;
-        drawBody(bodyPostCfg, closingBodyBaseYcm, thankYouBody, thanksMaxLines);
       }
     }
   } else if (pageNum === 3) {
@@ -1289,35 +1294,33 @@ if (textCfg.SEAL) {
       }
       layoutCursorYcm = postBodyBaseYcm + postLines.length * lineHeightCm;
 
-      const thankYouBody = getThankYouBody(reportFields);
-      if (thankYouBody) {
-        layoutCursorYcm += lineHeightCm;
-        const closingHeadingBaseYcm = layoutCursorYcm;
-        if (headerPostCfg) {
-          slide.addText('【お礼文】', {
-            x: cmToInch(headerPostCfg.x),
-            y: cmToInch(closingHeadingBaseYcm),
-            w: cmToInch(headerPostCfg.w),
-            h: cmToInch(headerPostCfg.h),
-            fontSize: LAYOUT.FONTS.SECTION_HEADER,
-            bold: true
-          });
-          layoutCursorYcm = closingHeadingBaseYcm + headerPostCfg.h;
-        }
-        const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
-        const closingBodyBaseYcm = layoutCursorYcm;
-        const thankYouLines = getVisibleBody(bodyPostCfg, thankYouBody, thanksMaxLines);
-        if (bodyPostCfg && thankYouLines.length > 0) {
-          slide.addText(thankYouLines.join('\n'), {
-            x: cmToInch(bodyPostCfg.x),
-            y: cmToInch(closingBodyBaseYcm),
-            w: cmToInch(bodyPostCfg.w),
-            h: cmToInch(thankYouLines.length * lineHeightCm),
-            fontSize: LAYOUT.FONTS.BODY_BASE,
-            align: 'left',
-            valign: 'top',
-            wrap: true
-          });
+      // PAGE3が有効ならお礼文はPAGE3側に出すためスキップ
+      if (!options?.showPage3) {
+        const thankYouBody = getThankYouBody(reportFields);
+        if (thankYouBody) {
+          // 5行空けを試み、スペース不足なら最低2行まで縮める
+          const headingH = headerPostCfg?.h ?? 0;
+          let gapLines = 5;
+          while (gapLines > 2 && layoutCursorYcm + gapLines * lineHeightCm + headingH > pageBottomCm) {
+            gapLines--;
+          }
+          layoutCursorYcm += gapLines * lineHeightCm;
+
+          const thanksMaxLines = Math.max(0, Math.floor((pageBottomCm - layoutCursorYcm) / lineHeightCm));
+          const closingBodyBaseYcm = layoutCursorYcm;
+          const thankYouLines = getVisibleBody(bodyPostCfg, thankYouBody, thanksMaxLines);
+          if (bodyPostCfg && thankYouLines.length > 0) {
+            slide.addText(thankYouLines.join('\n'), {
+              x: cmToInch(bodyPostCfg.x),
+              y: cmToInch(closingBodyBaseYcm),
+              w: cmToInch(bodyPostCfg.w),
+              h: cmToInch(thankYouLines.length * lineHeightCm),
+              fontSize: LAYOUT.FONTS.BODY_BASE,
+              align: 'left',
+              valign: 'top',
+              wrap: true
+            });
+          }
         }
       }
     }
