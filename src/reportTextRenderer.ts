@@ -98,11 +98,25 @@ export function formatSection(title: string, body: string) {
   return `【${title}】\n${t}\n`;
 }
 
+function indentEachLine(text: string) {
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => (line === '' ? line : `　${line}`))
+    .join('\n');
+}
+
 function buildPage3Body(reportFields: ReportFields, options?: RenderOptions) {
   const page3FreeText = String(reportFields.page3Text || '').trim();
+  const shouldIndentPostOnPage3 =
+    options?.showPage3 &&
+    options?.postPlacement === 'page3' &&
+    (options?.indentPostOnPage3 ?? true);
+  const postBodyForPage3 = shouldIndentPostOnPage3
+    ? indentEachLine(reportFields.postText || '')
+    : (reportFields.postText || '');
   const postSection =
-    options?.showPage3 && options?.postPlacement === 'page3'
-      ? formatSection('術後経過', reportFields.postText || '')
+    options?.showPage3 && options?.postPlacement === 'page3' && postBodyForPage3.trim() !== ''
+      ? `【術後経過】\n${postBodyForPage3}\n`
       : '';
 
   const parts: string[] = [];
@@ -271,6 +285,7 @@ const normalizeJapaneseSentence = (text: string) =>
 type RenderOptions = {
   showPage3?: boolean;
   postPlacement?: 'page2' | 'page3';
+  indentPostOnPage3?: boolean;
   page2ImagesBottomYcm?: number;
   page3ImagesBottomYcm?: number;
 };

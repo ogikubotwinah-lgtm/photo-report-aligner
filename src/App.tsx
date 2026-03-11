@@ -241,6 +241,9 @@ const App: React.FC = () => {
   const shouldOpenPostPlacementOnFocusRef = useRef(false);
   const shouldOpenPage2PhotoCategoryOnFocusRef = useRef(false);
   const shouldOpenThankYouTextTypeOnFocusRef = useRef(false);
+  const holdTimeoutRef = useRef<number | null>(null);
+  const holdIntervalRef = useRef<number | null>(null);
+  const suppressNextClickRef = useRef(false);
 
   // ...この下に既存の state / useEffect / handlers が続く
 
@@ -391,7 +394,6 @@ const App: React.FC = () => {
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
   const [previewYOffsets, setPreviewYOffsets] = useState<PreviewYOffsetMap>(PREVIEW_Y_OFFSET_INITIAL);
-  const [isYOffsetOpen, setIsYOffsetOpen] = useState(false);
 
   const page2PhotoCategoryLabel = useMemo(() => {
     if (reportFields.page2PhotoCategory === 'treatment-after') return '【治療時・治療後写真】';
@@ -577,7 +579,10 @@ useEffect(() => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log('handleFileUpload triggered');
     const files = Array.from(e.target.files || []) as File[];
-    if (!files.length) return;
+    if (!files.length) {
+      e.currentTarget.value = '';
+      return;
+    }
     recordHistory();
     const newImages: ImageData[] = await Promise.all(
       files.map((file: File) => {
@@ -606,6 +611,10 @@ useEffect(() => {
       })
     );
     setImages((prev: ImageData[]) => [...prev, ...newImages]);
+    if (currentPage === 1) setPage1Confirmed(false);
+    if (currentPage === 2) setPage2Confirmed(false);
+    if (currentPage === 3) setPage3Confirmed(false);
+    e.currentTarget.value = '';
   };
 
   const rotateImage = (id: string, direction: 'left' | 'right') => {
@@ -824,6 +833,7 @@ useEffect(() => {
     let textParts = buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
       showPage3,
       postPlacement,
+      indentPostOnPage3: true,
       page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
       page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
     });
@@ -1161,6 +1171,7 @@ ${doctor} 先生
         addPptxText(slide, pageNum, reportFields, {
           showPage3,
           postPlacement,
+          indentPostOnPage3: true,
           page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
           page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
         });
@@ -1253,6 +1264,39 @@ ${doctor} 先生
       return next;
     });
   }, [activePreviewYOffsetGroup]);
+
+  const nudgePreviewYOffset = useCallback((key: PreviewYOffsetKey, delta: number) => {
+    setPreviewYOffsets((prev) => ({
+      ...prev,
+      [key]: Number((prev[key] + delta).toFixed(2)),
+    }));
+  }, []);
+
+  const stopContinuousAdjust = useCallback(() => {
+    if (holdTimeoutRef.current !== null) {
+      window.clearTimeout(holdTimeoutRef.current);
+      holdTimeoutRef.current = null;
+    }
+    if (holdIntervalRef.current !== null) {
+      window.clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
+    }
+  }, []);
+
+  const startContinuousAdjust = useCallback((adjustFn: () => void) => {
+    stopContinuousAdjust();
+    suppressNextClickRef.current = false;
+    holdTimeoutRef.current = window.setTimeout(() => {
+      suppressNextClickRef.current = true;
+      holdIntervalRef.current = window.setInterval(adjustFn, 80);
+    }, 350);
+  }, [stopContinuousAdjust]);
+
+  useEffect(() => {
+    return () => {
+      stopContinuousAdjust();
+    };
+  }, [stopContinuousAdjust]);
 
   const svgData = useMemo(() => calculateSvgDataForPage(previewPage, { applyPreviewOffsets: true }), [calculateSvgDataForPage, previewPage]);
   const svgPage1 = useMemo(() => calculateSvgDataForPage(1).svgCode, [calculateSvgDataForPage]);
@@ -2303,6 +2347,9 @@ ${doctor} 先生
             <button
               onClick={() => {
                 console.log('image upload button clicked');
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = '';
+                }
                 fileInputRef.current?.click();
               }}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-bold shadow-lg active:scale-95 flex items-center gap-2 transition-all"
@@ -2378,7 +2425,7 @@ ${doctor} 先生
                           style={{
                             width: "100%",
                             height: "100%",
-                            objectFit: "cover",
+                            objectFit: "contain",
                             transform: `rotate(${img.rotation}deg)`,
                             display: "block"
                           }}
@@ -2474,50 +2521,66 @@ ${doctor} 先生
   <div className="justify-self-end min-w-[180px]" />
 </div>
 
-        <div className="lg:col-span-12 bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
-          <div
-            className="p-4 flex justify-center items-center overflow-hidden"
-            style={{ backgroundColor: 'rgba(241,245,249,0.5)' }}
-          >
+        <div className="lg:col-span-12 flex flex-wrap items-start justify-center gap-8">
+          <div className="w-full lg:flex-1 lg:min-w-[640px] bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
             <div
-              className="shadow-[0_15px_30px_rgba(0,0,0,0.1)] bg-white border border-slate-300 relative"
-              style={{ height: '480px', aspectRatio: '210 / 297' }}
+              className="p-4 flex justify-center items-center overflow-hidden"
+              style={{ backgroundColor: 'rgba(241,245,249,0.5)' }}
             >
               <div
-                className="w-full h-full"
-                style={{ color: "#0f172a" }}
-                dangerouslySetInnerHTML={{ __html: svgData.svgCode }}
-              />
+                className="shadow-[0_15px_30px_rgba(0,0,0,0.1)] bg-white border border-slate-300 relative"
+                style={{ height: '480px', aspectRatio: '210 / 297' }}
+              >
+                <div
+                  className="w-full h-full"
+                  style={{ color: "#0f172a" }}
+                  dangerouslySetInnerHTML={{ __html: svgData.svgCode }}
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="lg:col-span-12">
-          <div className="max-w-xl mx-auto">
-            <button
-              type="button"
-              onClick={() => setIsYOffsetOpen((prev) => !prev)}
-              className="flex items-center justify-between w-full text-left px-4 py-3 rounded-2xl border border-slate-200 bg-white shadow-sm"
-            >
+          <div className="w-full max-w-xl lg:w-[420px] lg:max-w-[420px]">
+            <div className="flex items-center w-full text-left px-4 py-3 rounded-2xl border border-slate-200 bg-white shadow-sm">
               <span className="text-base font-semibold text-slate-700">Yオフセット調整（{activePreviewYOffsetGroup.section}）</span>
-              <span className="text-slate-500 text-base">{isYOffsetOpen ? '▲' : '▼'}</span>
-            </button>
-            {isYOffsetOpen && (
-              <div className="mt-2 rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-base font-semibold text-slate-700">Yオフセット項目</div>
-                  <button
-                    type="button"
-                    onClick={resetCurrentPagePreviewYOffsets}
-                    className="text-base px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
-                  >
-                    このページをリセット
-                  </button>
-                </div>
-                <div>
-                  {activePreviewYOffsetGroup.items.map((item, idx) => (
-                    <label key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 mb-2 last:mb-0">
-                      <span className="text-base text-slate-700">{item.label}</span>
+            </div>
+            <div className="mt-2 rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-base font-semibold text-slate-700">Yオフセット項目</div>
+                <button
+                  type="button"
+                  onClick={resetCurrentPagePreviewYOffsets}
+                  className="text-base px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
+                >
+                  このページをリセット
+                </button>
+              </div>
+              <div>
+                {activePreviewYOffsetGroup.items.map((item, idx) => (
+                  <label key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto] items-center gap-2 mb-2 last:mb-0">
+                    <span className="text-base text-slate-700">{item.label}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (suppressNextClickRef.current) {
+                            suppressNextClickRef.current = false;
+                            return;
+                          }
+                          nudgePreviewYOffset(item.key, -0.01);
+                        }}
+                        onMouseDown={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
+                        onMouseUp={stopContinuousAdjust}
+                        onMouseLeave={stopContinuousAdjust}
+                        onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
+                        onTouchEnd={stopContinuousAdjust}
+                        onTouchCancel={stopContinuousAdjust}
+                        className="h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-700 transition-colors"
+                        aria-label={`${item.label} を上へ移動`}
+                        title="上へ移動"
+                      >
+                        △
+                      </button>
                       <input
                         type="number"
                         step="0.01"
@@ -2533,11 +2596,32 @@ ${doctor} 先生
                         }}
                       />
                       <span className="text-base text-slate-500">cm</span>
-                    </label>
-                  ))}
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (suppressNextClickRef.current) {
+                            suppressNextClickRef.current = false;
+                            return;
+                          }
+                          nudgePreviewYOffset(item.key, 0.01);
+                        }}
+                        onMouseDown={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
+                        onMouseUp={stopContinuousAdjust}
+                        onMouseLeave={stopContinuousAdjust}
+                        onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
+                        onTouchEnd={stopContinuousAdjust}
+                        onTouchCancel={stopContinuousAdjust}
+                        className="h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-700 transition-colors"
+                        aria-label={`${item.label} を下へ移動`}
+                        title="下へ移動"
+                      >
+                        ▽
+                      </button>
+                    </div>
+                  </label>
+                ))}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </main>
