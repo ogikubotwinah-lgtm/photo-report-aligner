@@ -286,8 +286,9 @@ type RenderOptions = {
   showPage3?: boolean;
   postPlacement?: 'page2' | 'page3';
   indentPostOnPage3?: boolean;
-  page2ImagesBottomYcm?: number;
   page3ImagesBottomYcm?: number;
+  page2ImagesBottomYcm?: number;
+  previewYOffsets?: Partial<import('./App').PreviewYOffsetMap>;
 };
 
 export function buildSvgTextParts(
@@ -794,71 +795,129 @@ if (textCfg.HOSPITAL_EMAIL) {
       svgParts.push(`  <line x1="${lx}" y1="${ly}" x2="${lx + lw}" y2="${ly}" stroke="#000" stroke-width="${ptToPx(0.5)}" />`);
     }
 
-    const page3Body = buildPage3Body(reportFields, options);
+    // --- PAGE3: 縦カーソル方式で安定レイアウト ---
+    // 設定
+    const page3StartY = 1.73;
+    const page3StartX = 1.0;
+    let cursorY = page3StartY;
+    const fontFamily = svgFontFamily;
+    const fontPt = LAYOUT.FONTS.BODY_BASE;
+    const fontPx = ptToPx(fontPt);
+    const lineHeightPx = fontPx * 1.15;
+    const lineHeightCm = lineHeightPx / pxPerCm;
 
-    if (textCfg?.FREE_TEXT_PAGE3) {
-      const fontPt = LAYOUT.FONTS.BODY_BASE;
-      const fontPx = ptToPx(fontPt);
-      const fontFamily = svgFontFamily;
-      const lineHeightPx = fontPx * 1.15;
-      const lineHeightCm = lineHeightPx / pxPerCm;
+    // 1. 画像（未実装: 画像描画ロジックが必要な場合はここに追加）
+    // 画像の最下端まで cursorY を進める（仮実装: 画像がなければスキップ）
+    // TODO: 画像描画が必要な場合はここで cursorY を調整
 
-      const defaultPage3StartXcm = 1.04;
-      const defaultPage3StartYcm = 1.9;
-      const bodyStartXcm =
-        typeof options?.page3ImagesBottomYcm === 'number'
-          ? textCfg.FREE_TEXT_PAGE3.x
-          : defaultPage3StartXcm;
-      const bodyStartYcm =
-        typeof options?.page3ImagesBottomYcm === 'number'
-          ? options.page3ImagesBottomYcm + lineHeightCm
-          : defaultPage3StartYcm;
-      const bodyBottomYcm = textCfg.FREE_TEXT_PAGE3.y + textCfg.FREE_TEXT_PAGE3.h;
-      const bodyHeightCm = Math.max(lineHeightCm, bodyBottomYcm - bodyStartYcm);
-
-      const bx = slideOffsetX + bodyStartXcm * pxPerCm;
-      const by = slideOffsetY + bodyStartYcm * pxPerCm;
-      const bw = textCfg.FREE_TEXT_PAGE3.w * pxPerCm;
-      const bh = bodyHeightCm * pxPerCm;
-      const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
-
+    // 2. 【PAGE3】自由入力
+    let freeTextHeight = 0;
+    if (textCfg.FREE_TEXT_PAGE3 && reportFields.page3Text) {
+      const box = textCfg.FREE_TEXT_PAGE3;
+      const bw = box.w * pxPerCm;
+      const bh = box.h * pxPerCm;
+      const bx = slideOffsetX + page3StartX * pxPerCm;
+      // 画像がある場合は2行空け、なければそのまま
+      // 今回は画像なし前提なので2行空けは省略
       const ctx = getMeasureContext(fontPx, fontFamily);
-      const wrapped = wrapTextByMeasure(page3Body, bw, ctx);
+      const wrapped = wrapTextByMeasure(reportFields.page3Text, bw, ctx);
+      const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
       const visible = clampLines(wrapped, maxLines);
-      const postFirstLineExtraDyPx =
-        options?.showPage3 && options?.postPlacement === 'page3'
-          ? 0.19 * pxPerCm
-          : 0;
-
+      freeTextHeight = visible.length * lineHeightCm;
+      const baseY = cursorY;
+      const renderedY = baseY + (options?.previewYOffsets?.page3FreeText ?? 0);
+      const by = slideOffsetY + renderedY * pxPerCm;
       const parts: string[] = [];
-      let sawPostHeader = false;
-      let shiftedFirstPostLine = false;
       visible.forEach((ln, idx) => {
         const lineText = ln === '' ? '　' : ln;
-        if (lineText.includes('術後経過')) {
-          sawPostHeader = true;
-        }
-
-        const isFirstPostBodyLine =
-          sawPostHeader &&
-          lineText.trim() !== '' &&
-          !lineText.includes('術後経過') &&
-          !shiftedFirstPostLine;
-
-        const dyPx = idx === 0
-          ? 0
-          : lineHeightPx + (isFirstPostBodyLine ? postFirstLineExtraDyPx : 0);
-
-        if (isFirstPostBodyLine) {
-          shiftedFirstPostLine = true;
-        }
-
-        parts.push(`<tspan x="${bx}" dy="${dyPx}">${escapeXml(lineText)}</tspan>`);
+        if (idx === 0)
+          parts.push(`<tspan x="${bx}" dy="0">${escapeXml(lineText)}</tspan>`);
+        else
+          parts.push(`<tspan x="${bx}" dy="${lineHeightPx}">${escapeXml(lineText)}</tspan>`);
       });
-
       svgParts.push(
         `  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`
       );
+      cursorY += freeTextHeight;
+    }
+
+    // 3. 【術後経過】タイトル
+    let postopTitleHeight = 0;
+    if (textCfg.SECTION_HEADER_POSTOP_PAGE3) {
+      // 自由入力があれば1行空け
+      if (freeTextHeight > 0) cursorY += lineHeightCm;
+      const box = textCfg.SECTION_HEADER_POSTOP_PAGE3;
+      const fontPxHeader = ptToPx(LAYOUT.FONTS.SECTION_HEADER);
+      const bx = slideOffsetX + page3StartX * pxPerCm;
+      const baseY = cursorY;
+      const renderedY = baseY + (options?.previewYOffsets?.page3PostopTitle ?? 0);
+      const by = slideOffsetY + renderedY * pxPerCm;
+      svgParts.push(
+        `  <text x="${bx}" y="${by}" font-size="${fontPxHeader}" fill="#000" font-family="${svgFontFamily}" dominant-baseline="hanging" font-weight="bold">【術後経過】</text>`
+      );
+      postopTitleHeight = lineHeightCm;
+      cursorY += postopTitleHeight;
+    }
+
+    // 4. 【術後経過】本文
+    let postopBodyHeight = 0;
+    if (textCfg.FREE_TEXT_POSTOP_PAGE3 && reportFields.postText) {
+      const box = textCfg.FREE_TEXT_POSTOP_PAGE3;
+      const bw = box.w * pxPerCm;
+      const bh = box.h * pxPerCm;
+      const bx = slideOffsetX + page3StartX * pxPerCm;
+      const ctx = getMeasureContext(fontPx, fontFamily);
+      const wrapped = wrapTextByMeasure(reportFields.postText, bw, ctx);
+      const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
+      const visible = clampLines(wrapped, maxLines);
+      postopBodyHeight = visible.length * lineHeightCm;
+      const baseY = cursorY;
+      const renderedY = baseY + (options?.previewYOffsets?.page3PostopBody ?? 0);
+      const by = slideOffsetY + renderedY * pxPerCm;
+      const parts: string[] = [];
+      visible.forEach((ln, idx) => {
+        const lineText = ln === '' ? '　' : ln;
+        if (idx === 0)
+          parts.push(`<tspan x="${bx}" dy="0">${escapeXml(lineText)}</tspan>`);
+        else
+          parts.push(`<tspan x="${bx}" dy="${lineHeightPx}">${escapeXml(lineText)}</tspan>`);
+      });
+      svgParts.push(
+        `  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`
+      );
+      cursorY += postopBodyHeight;
+    }
+
+    // 5. 【お礼文】本文（PAGE3に出る場合）
+    if (textCfg.FREE_TEXT_THANKS_PAGE3) {
+      const thankYouBody = getThankYouBody(reportFields);
+      if (thankYouBody) {
+        // 術後経過本文があれば1行空け
+        if (postopBodyHeight > 0) cursorY += lineHeightCm;
+        const box = textCfg.FREE_TEXT_THANKS_PAGE3;
+        const bw = box.w * pxPerCm;
+        const bh = box.h * pxPerCm;
+        const bx = slideOffsetX + page3StartX * pxPerCm;
+        const ctx = getMeasureContext(fontPx, fontFamily);
+        const wrapped = wrapTextByMeasure(thankYouBody, bw, ctx);
+        const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
+        const visible = clampLines(wrapped, maxLines);
+        const baseY = cursorY;
+        const renderedY = baseY + (options?.previewYOffsets?.page3ThanksBody ?? 0);
+        const by = slideOffsetY + renderedY * pxPerCm;
+        const parts: string[] = [];
+        visible.forEach((ln, idx) => {
+          const lineText = ln === '' ? '　' : ln;
+          if (idx === 0)
+            parts.push(`<tspan x="${bx}" dy="0">${escapeXml(lineText)}</tspan>`);
+          else
+            parts.push(`<tspan x="${bx}" dy="${lineHeightPx}">${escapeXml(lineText)}</tspan>`);
+        });
+        svgParts.push(
+          `  <text x="${bx}" y="${by}" font-size="${fontPx}" fill="#000" font-family="${fontFamily}" dominant-baseline="hanging">${parts.join('')}</text>`
+        );
+        cursorY += visible.length * lineHeightCm;
+      }
     }
   }
 
@@ -1363,42 +1422,67 @@ if (textCfg.SEAL) {
       });
     }
 
-    const page3Body = buildPage3Body(reportFields, options);
+    // 1. 【PAGE3】自由入力
+    if (textCfg.FREE_TEXT_PAGE3 && reportFields.page3Text) {
+      const box = textCfg.FREE_TEXT_PAGE3;
+      const fitSize = fitTextToBox(reportFields.page3Text, box, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+      slide.addText(reportFields.page3Text, {
+        x: cmToInch(box.x),
+        y: cmToInch(textCfg.FREE_TEXT_PAGE3.y + (options?.previewYOffsets?.page3FreeText ?? 0)),
+        w: cmToInch(box.w),
+        h: cmToInch(box.h),
+        fontSize: fitSize,
+        align: 'left',
+        valign: 'top',
+        wrap: true
+      });
+    }
 
-    const fontPt = LAYOUT.FONTS.BODY_BASE;
-    const fontPx = ptToPx(fontPt);
-    const lineHeightPx = fontPx * 1.15;
-    const lineHeightCm = (lineHeightPx / 96) * 2.54;
+    // 2. 【術後経過】タイトル
+    if (textCfg.SECTION_HEADER_POSTOP_PAGE3) {
+      slide.addText('【術後経過】', {
+        x: cmToInch(textCfg.SECTION_HEADER_POSTOP_PAGE3.x),
+        y: cmToInch(textCfg.SECTION_HEADER_POSTOP_PAGE3.y + (options?.previewYOffsets?.page3PostopTitle ?? 0)),
+        w: cmToInch(textCfg.SECTION_HEADER_POSTOP_PAGE3.w),
+        h: cmToInch(textCfg.SECTION_HEADER_POSTOP_PAGE3.h),
+        fontSize: LAYOUT.FONTS.SECTION_HEADER,
+        bold: true
+      });
+    }
 
-    const defaultPage3StartXcm = 1.04;
-    const defaultPage3StartYcm = 1.9;
-    const bodyStartXcm =
-      typeof options?.page3ImagesBottomYcm === 'number'
-        ? textCfg.FREE_TEXT_PAGE3.x
-        : defaultPage3StartXcm;
-    const bodyStartYcm =
-      typeof options?.page3ImagesBottomYcm === 'number'
-        ? options.page3ImagesBottomYcm + lineHeightCm
-        : defaultPage3StartYcm;
-    const bodyBottomYcm = textCfg.FREE_TEXT_PAGE3.y + textCfg.FREE_TEXT_PAGE3.h;
-    const bodyHeightCm = Math.max(lineHeightCm, bodyBottomYcm - bodyStartYcm);
-    const page3BodyBox = {
-      x: bodyStartXcm,
-      y: bodyStartYcm,
-      w: textCfg.FREE_TEXT_PAGE3.w,
-      h: bodyHeightCm,
-    };
+    // 3. 【術後経過】本文 (Page3)
+    if (textCfg.FREE_TEXT_POSTOP_PAGE3 && reportFields.postText) {
+      const box = textCfg.FREE_TEXT_POSTOP_PAGE3;
+      const fitSize = fitTextToBox(reportFields.postText, box, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+      slide.addText(reportFields.postText, {
+        x: cmToInch(box.x),
+        y: cmToInch(textCfg.FREE_TEXT_POSTOP_PAGE3.y + (options?.previewYOffsets?.page3PostopBody ?? 0)),
+        w: cmToInch(box.w),
+        h: cmToInch(box.h),
+        fontSize: fitSize,
+        align: 'left',
+        valign: 'top',
+        wrap: true
+      });
+    }
 
-    const fitSizePage3 = fitTextToBox(page3Body, page3BodyBox, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
-    slide.addText(page3Body || ' ', {
-      x: cmToInch(page3BodyBox.x),
-      y: cmToInch(page3BodyBox.y),
-      w: cmToInch(page3BodyBox.w),
-      h: cmToInch(page3BodyBox.h),
-      fontSize: fitSizePage3,
-      align: 'left',
-      valign: 'top',
-      wrap: true
-    });
+    // 4. 【お礼文】本文（PAGE3）
+    if (textCfg.FREE_TEXT_THANKS_PAGE3) {
+      const thankYouBody = getThankYouBody(reportFields);
+      if (thankYouBody) {
+        const box = textCfg.FREE_TEXT_THANKS_PAGE3;
+        const fitSize = fitTextToBox(thankYouBody, box, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+        slide.addText(thankYouBody, {
+          x: cmToInch(box.x),
+          y: cmToInch(textCfg.FREE_TEXT_THANKS_PAGE3.y + (options?.previewYOffsets?.page3ThanksBody ?? 0)),
+          w: cmToInch(box.w),
+          h: cmToInch(box.h),
+          fontSize: fitSize,
+          align: 'left',
+          valign: 'top',
+          wrap: true
+        });
+      }
+    }
   }
 }

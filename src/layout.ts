@@ -122,8 +122,10 @@ export const LAYOUT = {
       SEP_BOTTOM: { x: 1.0, y: 26.3, w: 17.38 },
     },
     TEXT: {
-      SECTION_HEADER_PAGE3: withPage2BlockOffset({ x: 0.63, y: 12.0, w: 6.0, h: 0.6 }),
-      FREE_TEXT_PAGE3: withPage2BlockOffset({ x: 1.23, y: 12.7, w: 17.0, h: 13.0 }),
+      FREE_TEXT_PAGE3: withPage2BlockOffset({ x: 1.23, y: 12.7, w: 17.0, h: 3.0 }), // 【PAGE3】自由入力
+      SECTION_HEADER_POSTOP_PAGE3: withPage2BlockOffset({ x: 1.0, y: 16.0, w: 5.0, h: 0.6 }), // 【術後経過】タイトル
+      FREE_TEXT_POSTOP_PAGE3: withPage2BlockOffset({ x: 1.23, y: 16.7, w: 17.0, h: 3.0 }), // 【術後経過】本文
+      FREE_TEXT_THANKS_PAGE3: withPage2BlockOffset({ x: 1.23, y: 20.0, w: 17.0, h: 2.0 }), // 【お礼文】本文
     },
   },
 } as const;

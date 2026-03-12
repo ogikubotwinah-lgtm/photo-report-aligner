@@ -26,7 +26,13 @@ type Props = {
 };
 
 // ✅ 共通カードUI（SortableItem と DragOverlay で使い回す）
-function ItemContent({ img }: { img: ImageData }) {
+function ItemContent({ img, setImages }: { img: ImageData; setImages: React.Dispatch<React.SetStateAction<ImageData[]>> }) {
+  const handleDelete = () => {
+    setImages(prev => prev.filter(i => i.id !== img.id));
+  };
+  const handleUnassign = () => {
+    setImages(prev => prev.map(i => i.id === img.id ? { ...i, row: 0 } : i));
+  };
   return (
     <div
       style={{
@@ -73,13 +79,45 @@ function ItemContent({ img }: { img: ImageData }) {
         >
           {img.name}
         </div>
+        <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+          <button
+            onClick={handleDelete}
+            style={{
+              flex: 1,
+              background: '#ffe4e6',
+              color: '#be123c',
+              border: '1px solid #fca5a5',
+              borderRadius: 6,
+              padding: '2px 0',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+            title="削除"
+          >削除</button>
+          {img.row !== 0 && (
+            <button
+              onClick={handleUnassign}
+              style={{
+                flex: 1,
+                background: '#f1f5f9',
+                color: '#334155',
+                border: '1px solid #cbd5e1',
+                borderRadius: 6,
+                padding: '2px 0',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+              title="戻す"
+            >戻す</button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 // ✅ ドラッグ可能な個別アイテム
-function SortableItem({ img }: { img: ImageData }) {
+function SortableItem({ img, setImages }: { img: ImageData; setImages: React.Dispatch<React.SetStateAction<ImageData[]>> }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: img.id });
 
@@ -95,13 +133,13 @@ function SortableItem({ img }: { img: ImageData }) {
       {...attributes}
       {...listeners}
     >
-      <ItemContent img={img} />
+      <ItemContent img={img} setImages={setImages} />
     </div>
   );
 }
 
 // ✅ 段落コンテナ（droppable + sortable context）
-function RowContainer({ row, images }: { row: number; images: ImageData[] }) {
+function RowContainer({ row, images, setImages }: { row: number; images: ImageData[]; setImages: React.Dispatch<React.SetStateAction<ImageData[]>> }) {
   const ids = images.map((img) => img.id);
   const { setNodeRef, isOver } = useDroppable({ id: `row-${row}` });
 
@@ -130,7 +168,7 @@ function RowContainer({ row, images }: { row: number; images: ImageData[] }) {
           }}
         >
           {images.map((img) => (
-            <SortableItem key={img.id} img={img} />
+            <SortableItem key={img.id} img={img} setImages={setImages} />
           ))}
         </div>
       </SortableContext>
@@ -327,11 +365,11 @@ export default function RowBoard({ images, setImages, rows = 4 }: Props) {
     >
       <div style={{ display: "grid", gap: 12 }}>
         {Array.from({ length: rows }, (_, i) => i + 1).map((row) => (
-          <RowContainer key={row} row={row} images={byRow.get(row) ?? []} />
+          <RowContainer key={row} row={row} images={byRow.get(row) ?? []} setImages={setImages} />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>
-        {activeImage ? <ItemContent img={activeImage} /> : null}
+        {activeImage ? <ItemContent img={activeImage} setImages={setImages} /> : null}
       </DragOverlay>
     </DndContext>
   );
