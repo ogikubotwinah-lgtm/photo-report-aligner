@@ -26,12 +26,153 @@ type PreviewYOffsetKey =
   | 'page2ProcedureBody'
   | 'page2PostTitle'
   | 'page2PostBody'
-  | 'page2ThanksTitle'
   | 'page2ThanksBody'
   | 'page2PhotoCategoryTitle'
   | 'page3BodyStart';
 
 type PreviewYOffsetMap = Record<PreviewYOffsetKey, number>;
+
+type ImageCrop = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+const DEFAULT_IMAGE_CROP: ImageCrop = {
+  left: 0,
+  top: 0,
+  right: 1,
+  bottom: 1,
+};
+
+const IMAGE_CROP_MIN_SIZE = 0.12;
+const CROP_UI_GUTTER_PX = 12;
+
+type CropHandle = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+type CropDragMode = 'resize' | 'move';
+
+type CropViewportRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+type CropPixelRect = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeImageCrop(crop?: Partial<ImageCrop> | null): ImageCrop {
+  const left = Number.isFinite(Number((crop as any)?.left))
+    ? Number((crop as any).left)
+    : DEFAULT_IMAGE_CROP.left;
+  const top = Number.isFinite(Number((crop as any)?.top))
+    ? Number((crop as any).top)
+    : DEFAULT_IMAGE_CROP.top;
+  const right = Number.isFinite(Number((crop as any)?.right))
+    ? Number((crop as any).right)
+    : DEFAULT_IMAGE_CROP.right;
+  const bottom = Number.isFinite(Number((crop as any)?.bottom))
+    ? Number((crop as any).bottom)
+    : DEFAULT_IMAGE_CROP.bottom;
+
+  const normalizedLeft = clampNumber(left, 0, 1 - IMAGE_CROP_MIN_SIZE);
+  const normalizedTop = clampNumber(top, 0, 1 - IMAGE_CROP_MIN_SIZE);
+  const normalizedRight = clampNumber(right, normalizedLeft + IMAGE_CROP_MIN_SIZE, 1);
+  const normalizedBottom = clampNumber(bottom, normalizedTop + IMAGE_CROP_MIN_SIZE, 1);
+
+  return {
+    left: normalizedLeft,
+    top: normalizedTop,
+    right: normalizedRight,
+    bottom: normalizedBottom,
+  };
+}
+
+function normalizeImageCropByHandle(crop: ImageCrop, handle: CropHandle): ImageCrop {
+  let next = { ...crop };
+
+  if (handle === 'top-left') {
+    next.left = clampNumber(next.left, 0, next.right - IMAGE_CROP_MIN_SIZE);
+    next.top = clampNumber(next.top, 0, next.bottom - IMAGE_CROP_MIN_SIZE);
+  }
+
+  if (handle === 'top-right') {
+    next.right = clampNumber(next.right, next.left + IMAGE_CROP_MIN_SIZE, 1);
+    next.top = clampNumber(next.top, 0, next.bottom - IMAGE_CROP_MIN_SIZE);
+  }
+
+  if (handle === 'bottom-left') {
+    next.left = clampNumber(next.left, 0, next.right - IMAGE_CROP_MIN_SIZE);
+    next.bottom = clampNumber(next.bottom, next.top + IMAGE_CROP_MIN_SIZE, 1);
+  }
+
+  if (handle === 'bottom-right') {
+    next.right = clampNumber(next.right, next.left + IMAGE_CROP_MIN_SIZE, 1);
+    next.bottom = clampNumber(next.bottom, next.top + IMAGE_CROP_MIN_SIZE, 1);
+  }
+
+  return normalizeImageCrop(next);
+}
+
+function cropToPixels(crop: ImageCrop, viewport: Pick<CropViewportRect, 'width' | 'height'>): CropPixelRect {
+  return {
+    left: crop.left * viewport.width,
+    top: crop.top * viewport.height,
+    right: crop.right * viewport.width,
+    bottom: crop.bottom * viewport.height,
+  };
+}
+
+function pixelsToCrop(pixelRect: CropPixelRect, viewport: Pick<CropViewportRect, 'width' | 'height'>): ImageCrop {
+  if (viewport.width <= 0 || viewport.height <= 0) return DEFAULT_IMAGE_CROP;
+  return normalizeImageCrop({
+    left: pixelRect.left / viewport.width,
+    top: pixelRect.top / viewport.height,
+    right: pixelRect.right / viewport.width,
+    bottom: pixelRect.bottom / viewport.height,
+  });
+}
+
+function normalizeCropPixelRectByHandle(
+  pixelRect: CropPixelRect,
+  handle: CropHandle,
+  viewport: Pick<CropViewportRect, 'width' | 'height'>
+): CropPixelRect {
+  const minW = IMAGE_CROP_MIN_SIZE * viewport.width;
+  const minH = IMAGE_CROP_MIN_SIZE * viewport.height;
+  const next = { ...pixelRect };
+
+  if (handle === 'top-left') {
+    next.left = clampNumber(next.left, 0, next.right - minW);
+    next.top = clampNumber(next.top, 0, next.bottom - minH);
+  }
+
+  if (handle === 'top-right') {
+    next.right = clampNumber(next.right, next.left + minW, viewport.width);
+    next.top = clampNumber(next.top, 0, next.bottom - minH);
+  }
+
+  if (handle === 'bottom-left') {
+    next.left = clampNumber(next.left, 0, next.right - minW);
+    next.bottom = clampNumber(next.bottom, next.top + minH, viewport.height);
+  }
+
+  if (handle === 'bottom-right') {
+    next.right = clampNumber(next.right, next.left + minW, viewport.width);
+    next.bottom = clampNumber(next.bottom, next.top + minH, viewport.height);
+  }
+
+  return next;
+}
 
 const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
   section: 'PAGE1' | 'PAGE2' | 'PAGE3';
@@ -47,13 +188,12 @@ const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
   {
     section: 'PAGE2',
     items: [
+      { key: 'page2PhotoCategoryTitle', label: 'PAGE2 写真区分ラベル タイトル' },
       { key: 'page2ProcedureTitle', label: '【検査・処置内容】タイトル' },
       { key: 'page2ProcedureBody', label: '【検査・処置内容】本文' },
       { key: 'page2PostTitle', label: '【術後経過】タイトル' },
       { key: 'page2PostBody', label: '【術後経過】本文' },
-      { key: 'page2ThanksTitle', label: '【お礼文】タイトル' },
       { key: 'page2ThanksBody', label: '【お礼文】本文' },
-      { key: 'page2PhotoCategoryTitle', label: 'PAGE2 写真区分ラベル タイトル' },
     ],
   },
   {
@@ -69,7 +209,6 @@ const PREVIEW_Y_OFFSET_INITIAL: PreviewYOffsetMap = {
   page2ProcedureBody: 0,
   page2PostTitle: 0,
   page2PostBody: 0,
-  page2ThanksTitle: 0,
   page2ThanksBody: 0,
   page2PhotoCategoryTitle: 0,
   page3BodyStart: 0,
@@ -389,7 +528,16 @@ const App: React.FC = () => {
     2: [],
     3: [],
   });
-  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [activeCropImageId, setActiveCropImageId] = useState<string | null>(null);
+  const [activeCropViewportRect, setActiveCropViewportRect] = useState<CropViewportRect | null>(null);
+  const cropDragStateRef = useRef<{
+    mode: CropDragMode;
+    imageId: string;
+    handle: CropHandle | null;
+    startX: number;
+    startY: number;
+    startCrop: ImageCrop;
+  } | null>(null);
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
@@ -644,6 +792,263 @@ useEffect(() => {
     setImages((prev: ImageData[]) => prev.filter(img => img.id !== id));
   };
 
+  const getImageCrop = useCallback((img: ImageData): ImageCrop | null => {
+    const crop = (img as any).crop;
+    if (!crop || typeof crop !== 'object') return null;
+    return normalizeImageCrop(crop as Partial<ImageCrop>);
+  }, []);
+
+  const updateImageCrop = useCallback((id: string, updater: (current: ImageCrop) => ImageCrop) => {
+    setImages((prev: ImageData[]) => {
+      return prev.map((img) => {
+        if (img.id !== id) return img;
+        const current = normalizeImageCrop((img as any).crop as Partial<ImageCrop>);
+        const next = normalizeImageCrop(updater(current));
+        return { ...img, crop: next } as ImageData;
+      });
+    });
+  }, [setImages]);
+
+  const resetImageCrop = useCallback((id: string) => {
+    setImages((prev: ImageData[]) => {
+      return prev.map((img) => {
+        if (img.id !== id) return img;
+        return { ...img, crop: undefined } as ImageData;
+      });
+    });
+  }, [setImages]);
+
+  const startCropDrag = useCallback((e: React.MouseEvent, id: string, handle: CropHandle) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeCropImageId !== id) return;
+
+    const target = images.find((img) => img.id === id);
+    if (!target) return;
+
+    recordHistory();
+    cropDragStateRef.current = {
+      mode: 'resize',
+      imageId: id,
+      handle,
+      startX: e.clientX,
+      startY: e.clientY,
+      startCrop: getImageCrop(target) ?? DEFAULT_IMAGE_CROP,
+    };
+  }, [activeCropImageId, getImageCrop, images, recordHistory]);
+
+  const startCropMove = useCallback((e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (activeCropImageId !== id) return;
+
+    const target = images.find((img) => img.id === id);
+    if (!target) return;
+
+    recordHistory();
+    cropDragStateRef.current = {
+      mode: 'move',
+      imageId: id,
+      handle: null,
+      startX: e.clientX,
+      startY: e.clientY,
+      startCrop: getImageCrop(target) ?? DEFAULT_IMAGE_CROP,
+    };
+  }, [activeCropImageId, getImageCrop, images, recordHistory]);
+
+  const stopCropDrag = useCallback(() => {
+    cropDragStateRef.current = null;
+  }, []);
+
+  const getDisplayedImageRect = useCallback((img: ImageData): CropViewportRect | null => {
+    const host = document.getElementById(`crop-host-${img.id}`);
+    if (!host) return null;
+
+    const hostRect = host.getBoundingClientRect();
+    if (hostRect.width <= 0 || hostRect.height <= 0) return null;
+
+    const hostStyle = window.getComputedStyle(host);
+    const padLeft = Number.parseFloat(hostStyle.paddingLeft) || 0;
+    const padRight = Number.parseFloat(hostStyle.paddingRight) || 0;
+    const padTop = Number.parseFloat(hostStyle.paddingTop) || 0;
+    const padBottom = Number.parseFloat(hostStyle.paddingBottom) || 0;
+    const contentWidth = hostRect.width - padLeft - padRight;
+    const contentHeight = hostRect.height - padTop - padBottom;
+    if (contentWidth <= 0 || contentHeight <= 0) return null;
+
+    const rotated = img.rotation === 90 || img.rotation === 270;
+    const mediaW = rotated ? img.height : img.width;
+    const mediaH = rotated ? img.width : img.height;
+    if (!mediaW || !mediaH) return null;
+
+    const hostAspect = contentWidth / contentHeight;
+    const mediaAspect = mediaW / mediaH;
+
+    if (!Number.isFinite(hostAspect) || !Number.isFinite(mediaAspect) || mediaAspect <= 0) return null;
+
+    if (mediaAspect > hostAspect) {
+      const width = contentWidth;
+      const height = width / mediaAspect;
+      return { left: padLeft, top: padTop + (contentHeight - height) / 2, width, height };
+    }
+
+    const height = contentHeight;
+    const width = height * mediaAspect;
+    return { left: padLeft + (contentWidth - width) / 2, top: padTop, width, height };
+  }, []);
+
+  useEffect(() => {
+    if (!activeCropImageId) {
+      setActiveCropViewportRect(null);
+      return;
+    }
+
+    const target = images.find((img) => img.id === activeCropImageId);
+    if (!target) {
+      setActiveCropViewportRect(null);
+      return;
+    }
+
+    const measure = () => {
+      setActiveCropViewportRect(getDisplayedImageRect(target));
+    };
+
+    measure();
+    window.addEventListener('resize', measure);
+
+    return () => {
+      window.removeEventListener('resize', measure);
+    };
+  }, [activeCropImageId, images, getDisplayedImageRect]);
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const dragState = cropDragStateRef.current;
+      if (!dragState) return;
+
+      const overlay = document.getElementById(`crop-overlay-${dragState.imageId}`);
+      if (!overlay) return;
+
+      const rect = overlay.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const viewport = { width: rect.width, height: rect.height };
+      const dxPx = event.clientX - dragState.startX;
+      const dyPx = event.clientY - dragState.startY;
+
+      const base = dragState.startCrop;
+      const basePixels = cropToPixels(base, viewport);
+
+      if (dragState.mode === 'move') {
+        const width = basePixels.right - basePixels.left;
+        const height = basePixels.bottom - basePixels.top;
+        const nextLeft = clampNumber(basePixels.left + dxPx, 0, viewport.width - width);
+        const nextTop = clampNumber(basePixels.top + dyPx, 0, viewport.height - height);
+        const movedPixels: CropPixelRect = {
+          left: nextLeft,
+          top: nextTop,
+          right: nextLeft + width,
+          bottom: nextTop + height,
+        };
+        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport));
+        return;
+      }
+
+      if (!dragState.handle) return;
+      let nextPixels: CropPixelRect = { ...basePixels };
+
+      if (dragState.handle === 'top-left') {
+        nextPixels.left += dxPx;
+        nextPixels.top += dyPx;
+      }
+      if (dragState.handle === 'top-right') {
+        nextPixels.right += dxPx;
+        nextPixels.top += dyPx;
+      }
+      if (dragState.handle === 'bottom-left') {
+        nextPixels.left += dxPx;
+        nextPixels.bottom += dyPx;
+      }
+      if (dragState.handle === 'bottom-right') {
+        nextPixels.right += dxPx;
+        nextPixels.bottom += dyPx;
+      }
+
+      const normalizedPixels = normalizeCropPixelRectByHandle(nextPixels, dragState.handle, viewport);
+      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport), dragState.handle);
+      updateImageCrop(dragState.imageId, () => normalized);
+    };
+
+    const onMouseUp = () => {
+      if (!cropDragStateRef.current) return;
+      stopCropDrag();
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [stopCropDrag, updateImageCrop]);
+
+  const getImageDisplayStyle = useCallback((img: ImageData): CSSProperties => {
+    const crop = getImageCrop(img);
+    const isActiveCropTarget = activeCropImageId === img.id && !!activeCropViewportRect;
+
+    if (isActiveCropTarget) {
+      const insetTop = (crop ?? DEFAULT_IMAGE_CROP).top * 100;
+      const insetRight = (1 - (crop ?? DEFAULT_IMAGE_CROP).right) * 100;
+      const insetBottom = (1 - (crop ?? DEFAULT_IMAGE_CROP).bottom) * 100;
+      const insetLeft = (crop ?? DEFAULT_IMAGE_CROP).left * 100;
+
+      return {
+        position: 'absolute',
+        left: `${activeCropViewportRect!.left}px`,
+        top: `${activeCropViewportRect!.top}px`,
+        width: `${activeCropViewportRect!.width}px`,
+        height: `${activeCropViewportRect!.height}px`,
+        objectFit: 'contain',
+        clipPath: `inset(${insetTop}% ${insetRight}% ${insetBottom}% ${insetLeft}%)`,
+        transform: `rotate(${img.rotation}deg)`,
+        transformOrigin: 'center center',
+        display: 'block',
+      };
+    }
+
+    if (!crop) {
+      return {
+        width: '100%',
+        height: '100%',
+        objectFit: 'contain',
+        transform: `rotate(${img.rotation}deg)`,
+        display: 'block',
+      };
+    }
+
+    const insetTop = crop.top * 100;
+    const insetRight = (1 - crop.right) * 100;
+    const insetBottom = (1 - crop.bottom) * 100;
+    const insetLeft = crop.left * 100;
+
+    return {
+      width: '100%',
+      height: '100%',
+      objectFit: 'contain',
+      clipPath: `inset(${insetTop}% ${insetRight}% ${insetBottom}% ${insetLeft}%)`,
+      transform: `rotate(${img.rotation}deg)`,
+      transformOrigin: 'center center',
+      display: 'block',
+    };
+  }, [activeCropImageId, activeCropViewportRect, getImageCrop]);
+
+  useEffect(() => {
+    if (!activeCropImageId) return;
+    if (images.some((img) => img.id === activeCropImageId)) return;
+    setActiveCropImageId(null);
+  }, [activeCropImageId, images]);
+
 
 
 
@@ -885,10 +1290,10 @@ useEffect(() => {
         const procDelta = previewYOffsets.page2ProcedureBody * pxPerCm;
         const postTitleDelta = previewYOffsets.page2PostTitle * pxPerCm;
         const postDelta = previewYOffsets.page2PostBody * pxPerCm;
-        const thanksTitleDelta = previewYOffsets.page2ThanksTitle * pxPerCm;
         const thanksDelta = previewYOffsets.page2ThanksBody * pxPerCm;
 
-        let pendingBody: 'procedure' | 'post' | 'thanks' | null = null;
+        let pendingBody: 'procedure' | 'post' | null = null;
+        let bodyBlockIndex = 0;
 
         textParts = textParts.map((part) => {
           if (part.includes('【検査・処置内容】')) {
@@ -899,20 +1304,19 @@ useEffect(() => {
             pendingBody = 'post';
             return postTitleDelta ? offsetTextY(part, postTitleDelta) : part;
           }
-          if (part.includes('【お礼文】')) {
-            pendingBody = 'thanks';
-            return thanksTitleDelta ? offsetTextY(part, thanksTitleDelta) : part;
-          }
 
-          if (pendingBody && part.includes('<text') && part.includes('<tspan') && !part.includes('【')) {
-            const delta =
-              pendingBody === 'procedure'
-                ? procDelta
-                : pendingBody === 'post'
-                  ? postDelta
-                  : thanksDelta;
-            pendingBody = null;
-            return delta ? offsetTextY(part, delta) : part;
+          if (part.includes('<text') && part.includes('<tspan') && !part.includes('【')) {
+            if (pendingBody) {
+              const delta = pendingBody === 'procedure' ? procDelta : postDelta;
+              pendingBody = null;
+              bodyBlockIndex += 1;
+              return delta ? offsetTextY(part, delta) : part;
+            }
+
+            bodyBlockIndex += 1;
+            if (bodyBlockIndex === 3 && thanksDelta) {
+              return offsetTextY(part, thanksDelta);
+            }
           }
 
           return part;
@@ -1570,24 +1974,6 @@ ${doctor} 先生
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32 font-sans">
-      {/* プレビューモーダル */}
-      {previewId && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur flex items-center justify-center p-10" onClick={() => setPreviewId(null)}>
-          <div className="relative max-w-full max-h-full" onClick={e => e.stopPropagation()}>
-            {images.find(img => img.id === previewId) && (
-              <img
-                src={images.find(img => img.id === previewId)!.dataUrl}
-                style={{ transform: `rotate(${images.find(img => img.id === previewId)!.rotation}deg)` }}
-                className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl"
-              />
-            )}
-            <button onClick={() => setPreviewId(null)} className="absolute -top-12 -right-12 text-white hover:text-orange-500 transition-colors">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </div>
-        </div>
-      )}
-
       <nav className="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto">
           <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">歯科治療報告書</h1>
@@ -2407,29 +2793,99 @@ ${doctor} 先生
                       className="p-3 bg-slate-50/50 border border-slate-100 rounded-[2rem] hover:border-orange-200 transition-all shadow-sm flex items-start gap-3 group"
                     >
                       <div
+                        id={`crop-host-${img.id}`}
                         style={{
+                          position: 'relative',
                           flex: 1,
                           minWidth: 0,
                           height: "200px",
+                          padding: activeCropImageId === img.id ? `${CROP_UI_GUTTER_PX}px` : 0,
                           overflow: "hidden",
                           borderRadius: "12px",        // rounded-xl相当
                           border: "1px solid #e2e8f0", // border-slate-200相当（薄い枠）
                           background: "#ffffff",       // 白
                           boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)" // shadow-inner相当
                         }}
-                        onClick={() => setPreviewId(img.id)}
                       >
                         <img
+                          id={`crop-image-${img.id}`}
                           src={img.dataUrl}
                           alt={img.name}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "contain",
-                            transform: `rotate(${img.rotation}deg)`,
-                            display: "block"
-                          }}
+                          style={getImageDisplayStyle(img)}
                         />
+                        {activeCropImageId === img.id && (
+                          <div
+                            id={`crop-overlay-${img.id}`}
+                            className="absolute"
+                            style={activeCropViewportRect && activeCropImageId === img.id ? {
+                              left: `${activeCropViewportRect.left}px`,
+                              top: `${activeCropViewportRect.top}px`,
+                              width: `${activeCropViewportRect.width}px`,
+                              height: `${activeCropViewportRect.height}px`,
+                            } : {
+                              left: 0,
+                              top: 0,
+                              width: '100%',
+                              height: '100%',
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="absolute inset-0 bg-slate-900/10" />
+                            {(() => {
+                              const crop = getImageCrop(img) ?? DEFAULT_IMAGE_CROP;
+                              const cropPixels = activeCropViewportRect && activeCropImageId === img.id
+                                ? cropToPixels(crop, activeCropViewportRect)
+                                : null;
+                              return (
+                                <div
+                                  className="absolute border-2 border-emerald-500 bg-transparent cursor-move"
+                                  style={cropPixels ? {
+                                    left: `${cropPixels.left}px`,
+                                    top: `${cropPixels.top}px`,
+                                    width: `${cropPixels.right - cropPixels.left}px`,
+                                    height: `${cropPixels.bottom - cropPixels.top}px`,
+                                  } : {
+                                    left: `${crop.left * 100}%`,
+                                    top: `${crop.top * 100}%`,
+                                    width: `${(crop.right - crop.left) * 100}%`,
+                                    height: `${(crop.bottom - crop.top) * 100}%`,
+                                  }}
+                                  onMouseDown={(e) => startCropMove(e, img.id)}
+                                >
+                                  <div className="absolute inset-0 border border-white/80 pointer-events-none" />
+                                  <button
+                                    type="button"
+                                    className="absolute -left-2.5 -top-2.5 h-5 w-5 rounded-full bg-white border-2 border-emerald-600 cursor-nwse-resize"
+                                    onMouseDown={(e) => startCropDrag(e, img.id, 'top-left')}
+                                    onClick={(e) => e.stopPropagation()}
+                                    aria-label="左上ハンドル"
+                                  />
+                                  <button
+                                    type="button"
+                                    className="absolute -right-2.5 -top-2.5 h-5 w-5 rounded-full bg-white border-2 border-emerald-600 cursor-nesw-resize"
+                                    onMouseDown={(e) => startCropDrag(e, img.id, 'top-right')}
+                                    onClick={(e) => e.stopPropagation()}
+                                    aria-label="右上ハンドル"
+                                  />
+                                  <button
+                                    type="button"
+                                    className="absolute -left-2.5 -bottom-2.5 h-5 w-5 rounded-full bg-white border-2 border-emerald-600 cursor-nesw-resize"
+                                    onMouseDown={(e) => startCropDrag(e, img.id, 'bottom-left')}
+                                    onClick={(e) => e.stopPropagation()}
+                                    aria-label="左下ハンドル"
+                                  />
+                                  <button
+                                    type="button"
+                                    className="absolute -right-2.5 -bottom-2.5 h-5 w-5 rounded-full bg-white border-2 border-emerald-600 cursor-nwse-resize"
+                                    onMouseDown={(e) => startCropDrag(e, img.id, 'bottom-right')}
+                                    onClick={(e) => e.stopPropagation()}
+                                    aria-label="右下ハンドル"
+                                  />
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
                       </div>
 
                       <div className="w-[160px] flex-shrink-0">
@@ -2460,6 +2916,31 @@ ${doctor} 先生
                               </svg>
                             </button>
                           </div>
+                          <button
+                            onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
+                            className={`h-10 rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
+                              activeCropImageId === img.id
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                            }`}
+                          >
+                            {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
+                          </button>
+                          {activeCropImageId === img.id && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
+                              <div className="text-xs text-emerald-800">四隅ハンドルをドラッグして範囲を調整</div>
+                              <button
+                                onClick={() => {
+                                  recordHistory();
+                                  resetImageCrop(img.id);
+                                }}
+                                className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
+                                title="リセット"
+                              >
+                                リセット
+                              </button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-2 gap-1.5">
                             {[1, 2, 3, 4].map(num => (
                               <button
