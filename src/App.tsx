@@ -191,7 +191,7 @@ const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
   {
     section: 'PAGE2',
     items: [
-      { key: 'page2PhotoCategoryTitle', label: 'PAGE2写真ラベル' },
+      { key: 'page2PhotoCategoryTitle', label: 'PAGE2 写真区分ラベル タイトル' },
       { key: 'page2ProcedureTitle', label: '【検査・処置内容】タイトル' },
       { key: 'page2ProcedureBody', label: '【検査・処置内容】本文' },
       { key: 'page2PostTitle', label: '【術後経過】タイトル' },
@@ -1996,7 +1996,7 @@ ${doctor} 先生
   }, [focusAndScroll]);
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-32 font-sans">
+    <div className="min-h-screen bg-slate-50 pb-4 font-sans">
       <nav className="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto">
           <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">歯科治療報告書</h1>
@@ -2044,10 +2044,10 @@ ${doctor} 先生
                             type="button"
                             onClick={() => selectCalendarDate(day)}
                             className={`h-8 rounded-lg text-base font-medium transition-colors ${
-                                isSelected
-                                  ? 'bg-orange-500 text-white'
-                                  : 'text-slate-700 hover:bg-slate-100'
-                              }`}
+                              isSelected
+                                ? 'bg-orange-500 text-white'
+                                : 'text-slate-700 hover:bg-slate-100'
+                            }`}
                           >
                             {day}
                           </button>
@@ -2264,6 +2264,167 @@ ${doctor} 先生
                 </div>
               </div>
 
+              <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
+                    <div className="relative" data-date-field="firstVisitDate">
+                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)} bg-white`}
+                    placeholder="202X年XX月XX日"
+                    value={reportFields.firstVisitDate}
+                    readOnly
+                    onClick={() => openCalendar('firstVisitDate')}
+                  />
+                  {openDateField === 'firstVisitDate' && (
+                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                        </div>
+                      </div>
+                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((day, idx) => {
+                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                          const isSelected = !!selectedCalendarDate
+                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                            && selectedCalendarDate.getDate() === day;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('sedationDate')); }}
+                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex justify-between">
+                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
+                    <div className="relative" data-date-field="sedationDate">
+                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)} bg-white`}
+                    placeholder="202X年XX月XX日"
+                    value={reportFields.sedationDate || ''}
+                    readOnly
+                    onClick={() => openCalendar('sedationDate')}
+                  />
+                  {openDateField === 'sedationDate' && (
+                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                        </div>
+                      </div>
+                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((day, idx) => {
+                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                          const isSelected = !!selectedCalendarDate
+                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                            && selectedCalendarDate.getDate() === day;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('anesthesiaDate')); }}
+                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex justify-between">
+                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
+                    <div className="relative" data-date-field="anesthesiaDate">
+                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)} bg-white`}
+                    placeholder="202X年XX月XX日"
+                    value={reportFields.anesthesiaDate}
+                    readOnly
+                    onClick={() => openCalendar('anesthesiaDate')}
+                  />
+                  {openDateField === 'anesthesiaDate' && (
+                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                        </div>
+                      </div>
+                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((day, idx) => {
+                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                          const isSelected = !!selectedCalendarDate
+                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                            && selectedCalendarDate.getDate() === day;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => focusAndScroll(document.getElementById('chief-complaint-input'))); }}
+                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex justify-between">
+                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </div>
+                </div>
+              </div>
+
               {/* 主訴（新規：テキスト入力） */}
               <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4 mt-1 md:mt-2">
                 <div className="space-y-1">
@@ -2377,7 +2538,7 @@ ${doctor} 先生
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   id="initial-textarea"
                   placeholder="初診時の所見など..."
@@ -2391,7 +2552,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE2写真ラベル</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE2写真区分ラベル</label>
                 <div className="relative" ref={page2PhotoCategoryDropdownRef}>
                   <button
                     type="button"
@@ -2435,7 +2596,7 @@ ${doctor} 先生
                         const isSelected = reportFields.page2PhotoCategory === item.value;
                         const isHighlighted = dropdownHighlight === idx;
                         return (
-                          <li key={item.value}>
+                          <li key={`${item.value || 'empty'}-${item.label}`}>
                             <button
                               type="button"
                               className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
@@ -2454,7 +2615,7 @@ ${doctor} 先生
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   placeholder="実施した検査や処置の詳細..."
                   value={reportFields.procedureText}
@@ -2462,7 +2623,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】本文 ({showPage3 && postPlacement === 'page3' ? 'Page 3' : 'Page 2'})</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   placeholder="術後の状態や今後の予定..."
                   value={reportFields.postText}
@@ -2475,7 +2636,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】本文 (Page 2)</label>
                 <div className="relative" ref={thankYouTextTypeDropdownRef}>
                   <button
                     type="button"
@@ -2535,7 +2696,7 @@ ${doctor} 先生
                 </div>
               </div>
               {showPage3 && (
-                <div className="bg-white p-3 rounded-xl space-y-2">
+                <div className="bg-slate-50 p-3 rounded-xl space-y-2">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE3写真ラベル</label>
                     <span className="text-xs text-slate-400">（自由入力）</span>
@@ -2672,7 +2833,7 @@ ${doctor} 先生
                         <img
                           id={`crop-image-${img.id}`}
                           src={img.dataUrl}
-                          alt=""
+                          alt={img.name}
                           style={getImageDisplayStyle(img)}
                         />
                         {activeCropImageId === img.id && (
@@ -2864,103 +3025,96 @@ ${doctor} 先生
   <div className="justify-self-end min-w-[180px]" />
 </div>
 
-        <div className="lg:col-span-12 flex flex-wrap items-start justify-center gap-8">
-          <div className="w-full lg:flex-1 lg:min-w-[640px] bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
-            <div
-              className="p-4 flex justify-center items-center overflow-hidden"
-              style={{ backgroundColor: 'rgba(241,245,249,0.5)' }}
-            >
-              <div
-                className="shadow-[0_15px_30px_rgba(0,0,0,0.1)] bg-white border border-slate-300 relative"
-                style={{ height: '480px', aspectRatio: '210 / 297' }}
-              >
+        <div className="lg:col-span-12 flex flex-row w-full min-h-[520px]">
+          {/* 左: プレビュー */}
+          <div className="flex flex-col justify-center items-center w-1/2 min-h-[520px] mt-8 mb-8">
+            <div className="flex justify-center items-center w-full py-8" style={{ backgroundColor: 'rgba(241,245,249,0.5)' }}>
+              <div className="relative" style={{ width: '560px', height: '560px', maxWidth: '98vw', aspectRatio: '210 / 297', transform: 'scale(1.3)' }}>
                 <div
                   className="w-full h-full"
-                  style={{ color: "#0f172a" }}
+                  style={{ color: '#0f172a' }}
                   dangerouslySetInnerHTML={{ __html: svgData.svgCode }}
                 />
               </div>
             </div>
           </div>
-
-          <div className="w-full max-w-xl lg:w-[420px] lg:max-w-[420px]">
-            <div className="flex items-center w-full text-left px-5 py-3 rounded-2xl border border-slate-200 bg-white shadow-sm mb-1.5">
-              <span className="text-base font-semibold text-slate-700">Yオフセット調整</span>
-              <button
-                type="button"
-                onClick={resetCurrentPagePreviewYOffsets}
-                className="ml-auto text-sm px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors"
-              >
-                このページをリセット
-              </button>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-5 py-4">
-              <div className="space-y-2">
+          {/* 右: Yオフセット調整 */}
+          <div className="flex flex-col justify-center items-center w-1/2 min-h-[520px]">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex flex-col w-full max-w-xl">
+              <div className="flex items-center w-full text-left mb-2">
+                <span className="text-base font-semibold text-slate-700">Yオフセット調整</span>
+                <div className="flex-1" />
+                <button
+                  type="button"
+                  onClick={resetCurrentPagePreviewYOffsets}
+                  className="text-base px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors ml-2"
+                >
+                  このページをリセット
+                </button>
+              </div>
+              <div>
                 {activePreviewYOffsetGroup.items.map((item, idx) => (
-                  <label
-                    key={`${item.key}-${idx}`}
-                    className="flex items-center gap-3 min-h-[48px] py-1 px-1 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    <span className="text-sm font-medium text-slate-700 min-w-[110px] text-left select-none">
-                      {item.label}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (suppressNextClickRef.current) {
-                          suppressNextClickRef.current = false;
-                          return;
-                        }
-                        nudgePreviewYOffset(item.key, -0.01);
-                      }}
-                      onMouseDown={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
-                      onMouseUp={stopContinuousAdjust}
-                      onMouseLeave={stopContinuousAdjust}
-                      onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
-                      onTouchEnd={stopContinuousAdjust}
-                      onTouchCancel={stopContinuousAdjust}
-                      className="h-11 w-11 flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-base font-bold text-slate-700 transition-colors"
-                      aria-label={`${item.label} を上へ移動`}
-                      title="上へ移動"
-                    >
-                      △
-                    </button>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="w-24 h-11 rounded-md border border-slate-200 bg-white px-3 text-base text-right focus:ring-2 focus:ring-orange-500 outline-none mx-1"
-                      value={previewYOffsets[item.key]}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        const next = raw === '' ? 0 : Number(raw);
-                        setPreviewYOffsets((prev) => ({
-                          ...prev,
-                          [item.key]: Number.isFinite(next) ? next : 0,
-                        }));
-                      }}
-                    />
-                    <span className="text-base text-slate-500 min-w-[2.5rem] text-center">cm</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (suppressNextClickRef.current) {
-                          suppressNextClickRef.current = false;
-                          return;
-                        }
-                        nudgePreviewYOffset(item.key, 0.01);
-                      }}
-                      onMouseDown={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
-                      onMouseUp={stopContinuousAdjust}
-                      onMouseLeave={stopContinuousAdjust}
-                      onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
-                      onTouchEnd={stopContinuousAdjust}
-                      onTouchCancel={stopContinuousAdjust}
-                      className="h-11 w-11 flex items-center justify-center rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-base font-bold text-slate-700 transition-colors"
-                      aria-label={`${item.label} を下へ移動`}
-                      title="下へ移動"
-                    >
-                      ▽
-                    </button>
+                  <label key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto] items-center gap-2 mb-2 last:mb-0">
+                    <span className="text-base text-slate-700">{item.label}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (suppressNextClickRef.current) {
+                            suppressNextClickRef.current = false;
+                            return;
+                          }
+                          nudgePreviewYOffset(item.key, -0.01);
+                        }}
+                        onMouseDown={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
+                        onMouseUp={stopContinuousAdjust}
+                        onMouseLeave={stopContinuousAdjust}
+                        onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
+                        onTouchEnd={stopContinuousAdjust}
+                        onTouchCancel={stopContinuousAdjust}
+                        className="h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-700 transition-colors"
+                        aria-label={`${item.label} を上へ移動`}
+                        title="上へ移動"
+                      >
+                        △
+                      </button>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-20 h-10 rounded-lg border border-slate-200 bg-white px-2 text-base text-right focus:ring-2 focus:ring-orange-500 outline-none"
+                        value={previewYOffsets[item.key]}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const next = raw === '' ? 0 : Number(raw);
+                          setPreviewYOffsets((prev) => ({
+                            ...prev,
+                            [item.key]: Number.isFinite(next) ? next : 0,
+                          }));
+                        }}
+                      />
+                      <span className="text-base text-slate-500">cm</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (suppressNextClickRef.current) {
+                            suppressNextClickRef.current = false;
+                            return;
+                          }
+                          nudgePreviewYOffset(item.key, 0.01);
+                        }}
+                        onMouseDown={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
+                        onMouseUp={stopContinuousAdjust}
+                        onMouseLeave={stopContinuousAdjust}
+                        onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
+                        onTouchEnd={stopContinuousAdjust}
+                        onTouchCancel={stopContinuousAdjust}
+                        className="h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-700 transition-colors"
+                        aria-label={`${item.label} を下へ移動`}
+                        title="下へ移動"
+                      >
+                        ▽
+                      </button>
+                    </div>
                   </label>
                 ))}
               </div>
