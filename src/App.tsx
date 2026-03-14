@@ -2552,7 +2552,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE2写真区分ラベル</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE2写真ラベル</label>
                 <div className="relative" ref={page2PhotoCategoryDropdownRef}>
                   <button
                     type="button"
@@ -2617,7 +2617,7 @@ ${doctor} 先生
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
-                  placeholder="実施した検査や処置の詳細..."
+                  placeholder=""
                   value={reportFields.procedureText}
                   onChange={e => setReportFields(v => ({ ...v, procedureText: e.target.value }))}
                 />
@@ -2625,7 +2625,7 @@ ${doctor} 先生
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】本文 ({showPage3 && postPlacement === 'page3' ? 'Page 3' : 'Page 2'})</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
-                  placeholder="術後の状態や今後の予定..."
+                  placeholder=""
                   value={reportFields.postText}
                   onKeyDown={(e) => {
                     if (e.key === 'Tab' && !e.shiftKey) {
@@ -2696,7 +2696,7 @@ ${doctor} 先生
                 </div>
               </div>
               {showPage3 && (
-                <div className="bg-slate-50 p-3 rounded-xl space-y-2">
+                <div className="bg-white p-3 rounded-xl space-y-2">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">PAGE3写真ラベル</label>
                     <span className="text-xs text-slate-400">（自由入力）</span>
@@ -2719,7 +2719,7 @@ ${doctor} 先生
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【PAGE3】自由入力</label>
                   <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
-                    placeholder="PAGE3に出す補足テキスト..."
+                    placeholder=""
                     value={reportFields.page3Text || ''}
                     onChange={e => setReportFields(v => ({ ...v, page3Text: e.target.value }))}
                   />
@@ -2833,7 +2833,7 @@ ${doctor} 先生
                         <img
                           id={`crop-image-${img.id}`}
                           src={img.dataUrl}
-                          alt={img.name}
+                          alt="画像"
                           style={getImageDisplayStyle(img)}
                         />
                         {activeCropImageId === img.id && (
@@ -3025,9 +3025,9 @@ ${doctor} 先生
   <div className="justify-self-end min-w-[180px]" />
 </div>
 
-        <div className="lg:col-span-12 flex flex-row w-full min-h-[520px]">
+        <div className="lg:col-span-12 flex flex-row items-start w-full">
           {/* 左: プレビュー */}
-          <div className="flex flex-col justify-center items-center w-1/2 min-h-[520px] mt-8 mb-8">
+          <div className="flex-1 flex justify-center mt-12 mb-20">
             <div className="flex justify-center items-center w-full py-8" style={{ backgroundColor: 'rgba(241,245,249,0.5)' }}>
               <div className="relative" style={{ width: '560px', height: '560px', maxWidth: '98vw', aspectRatio: '210 / 297', transform: 'scale(1.3)' }}>
                 <div
@@ -3039,8 +3039,8 @@ ${doctor} 先生
             </div>
           </div>
           {/* 右: Yオフセット調整 */}
-          <div className="flex flex-col justify-center items-center w-1/2 min-h-[520px]">
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex flex-col w-full max-w-xl">
+          <div className="flex-1 flex justify-center">
+            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex flex-col w-full max-w-[520px]">
               <div className="flex items-center w-full text-left mb-2">
                 <span className="text-base font-semibold text-slate-700">Yオフセット調整</span>
                 <div className="flex-1" />

@@ -77,7 +77,7 @@ function ItemContent({ img, setImages }: { img: ImageData; setImages: React.Disp
             textOverflow: "ellipsis",
           }}
         >
-          {img.name}
+          {/* ファイル名表示を削除（img.name） */}
         </div>
         <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
           <button
