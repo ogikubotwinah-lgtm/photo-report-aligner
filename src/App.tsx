@@ -540,8 +540,6 @@ const App: React.FC = () => {
     3: [],
   });
   const [activeCropImageId, setActiveCropImageId] = useState<string | null>(null);
-  // 編集UI表示専用
-  const [editingImageId, setEditingImageId] = useState<string | null>(null);
   const [activeCropViewportRect, setActiveCropViewportRect] = useState<CropViewportRect | null>(null);
   const cropDragStateRef = useRef<{
     mode: CropDragMode;
@@ -1248,22 +1246,13 @@ useEffect(() => {
     });
 
     // use shared helper to render all text portions so that SVG and PPTX stay in sync
-    let textParts = buildSvgTextParts(
-      pageNum,
-      reportFields.refDoctor?.trim() === ''
-        ? { ...reportFields, refDoctor: '' }
-        : reportFields,
-      pxPerCm,
-      slideOffsetX,
-      slideOffsetY,
-      {
-        showPage3,
-        postPlacement,
-        indentPostOnPage3: true,
-        page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
-        page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
-      }
-    );
+    let textParts = buildSvgTextParts(pageNum, reportFields, pxPerCm, slideOffsetX, slideOffsetY, {
+      showPage3,
+      postPlacement,
+      indentPostOnPage3: true,
+      page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
+      page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
+    });
 
     const offsetTextY = (part: string, deltaPx: number): string => {
       if (!deltaPx || !part.includes('<text')) return part;
@@ -1606,20 +1595,13 @@ ${doctor} 先生
           });
         });
 
-        addPptxText(
-          slide,
-          pageNum,
-          reportFields.refDoctor?.trim() === ''
-            ? { ...reportFields, refDoctor: '' }
-            : reportFields,
-          {
-            showPage3,
-            postPlacement,
-            indentPostOnPage3: true,
-            page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
-            page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
-          }
-        );
+        addPptxText(slide, pageNum, reportFields, {
+          showPage3,
+          postPlacement,
+          indentPostOnPage3: true,
+          page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
+          page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
+        });
 
         if (pageNum === 2 && page2PhotoCategoryLabel) {
           slide.addText(page2PhotoCategoryLabel, {
@@ -2103,7 +2085,7 @@ ${doctor} 先生
                     <input
                       id="ref-hospital-input"
                       className={`w-full max-w-[520px] h-11 px-3 py-2 rounded-xl border text-base ${getEmptyFieldToneClass(refHospitalInput)} bg-white`}
-                      placeholder=""
+                      placeholder="例：中川動物病院"
                       value={refHospitalInput}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -2161,7 +2143,7 @@ ${doctor} 先生
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">紹介病院メールアドレス</label>
                     <input id="ref-hospital-email" className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail)} bg-white`}
-                      placeholder=""
+                      placeholder="example@gmail.com"
                       value={reportFields.refHospitalEmail}
                       onChange={e => setReportFields(v => ({ ...v, refHospitalEmail: e.target.value }))}
                     />
@@ -2178,7 +2160,7 @@ ${doctor} 先生
                     <div className="relative">
                       <input className={`w-full h-11 border rounded-xl px-3 pr-12 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refDoctor)} bg-white`}
                         id="ref-doctor-input"
-                        placeholder=""
+                        placeholder="△△"
                         value={reportFields.refDoctor}
                         onChange={e => setReportFields(v => ({ ...v, refDoctor: e.target.value }))}
                       />
@@ -2193,7 +2175,7 @@ ${doctor} 先生
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">飼い主姓</label>
                     <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.ownerLastName)} bg-white`}
-                      placeholder=""
+                      placeholder="山田"
                       value={reportFields.ownerLastName}
                       onChange={e => setReportFields(v => ({ ...v, ownerLastName: e.target.value }))}
                     />
@@ -2201,7 +2183,7 @@ ${doctor} 先生
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">ペット名</label>
                     <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.petName)} bg-white`}
-                      placeholder=""
+                      placeholder="タロウ"
                       value={reportFields.petName}
                       onChange={e => setReportFields(v => ({ ...v, petName: e.target.value }))}
                       onKeyDown={e => {
@@ -2234,25 +2216,13 @@ ${doctor} 先生
                         }}
                         onClick={() => { setIsAttendingVetDropdownOpen(v => !v); setDropdownHighlight(-1); }}
                         onKeyDown={isAttendingVetDropdownOpen ? (e) => {
-                          const items = [ '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
-                          handleDropdownKeyDown(
-                            e,
-                            items.length,
-                            (idx) => {
-                              const name = items[idx];
-                              setReportFields(v => ({ ...v, attendingVet: name }));
-                              setIsAttendingVetDropdownOpen(false);
-                              // 主訴inputへフォーカス
-                              requestAnimationFrame(() => {
-                                const el = document.getElementById('chief-complaint-input');
-                                if (el) el.focus();
-                              });
-                              if (name) {
-                                requestAnimationFrame(() => openCalendar('firstVisitDate'));
-                              }
-                            },
-                            () => setIsAttendingVetDropdownOpen(false)
-                          );
+                          const items = ['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
+                          handleDropdownKeyDown(e, items.length, (idx) => {
+                            const name = items[idx];
+                            setReportFields(v => ({ ...v, attendingVet: name }));
+                            setIsAttendingVetDropdownOpen(false);
+                            if (name) requestAnimationFrame(() => openCalendar('firstVisitDate'));
+                          }, () => setIsAttendingVetDropdownOpen(false));
                         } : undefined}
                       >
                         <span className={reportFields.attendingVet ? 'text-slate-900' : 'text-slate-500'}>
@@ -2265,8 +2235,8 @@ ${doctor} 先生
                           role="listbox"
                           className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
                         >
-                          {[ '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
-                            const label = name;
+                          {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
+                            const label = name || '選択してください';
                             const isSelected = reportFields.attendingVet === name;
                             const isHighlighted = dropdownHighlight === idx;
                             return (
@@ -2294,13 +2264,174 @@ ${doctor} 先生
                 </div>
               </div>
 
+              <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
+                    <div className="relative" data-date-field="firstVisitDate">
+                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)} bg-white`}
+                    placeholder="202X年XX月XX日"
+                    value={reportFields.firstVisitDate}
+                    readOnly
+                    onClick={() => openCalendar('firstVisitDate')}
+                  />
+                  {openDateField === 'firstVisitDate' && (
+                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                        </div>
+                      </div>
+                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((day, idx) => {
+                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                          const isSelected = !!selectedCalendarDate
+                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                            && selectedCalendarDate.getDate() === day;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('sedationDate')); }}
+                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex justify-between">
+                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
+                    <div className="relative" data-date-field="sedationDate">
+                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)} bg-white`}
+                    placeholder="202X年XX月XX日"
+                    value={reportFields.sedationDate || ''}
+                    readOnly
+                    onClick={() => openCalendar('sedationDate')}
+                  />
+                  {openDateField === 'sedationDate' && (
+                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                        </div>
+                      </div>
+                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((day, idx) => {
+                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                          const isSelected = !!selectedCalendarDate
+                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                            && selectedCalendarDate.getDate() === day;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('anesthesiaDate')); }}
+                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex justify-between">
+                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
+                    <div className="relative" data-date-field="anesthesiaDate">
+                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)} bg-white`}
+                    placeholder="202X年XX月XX日"
+                    value={reportFields.anesthesiaDate}
+                    readOnly
+                    onClick={() => openCalendar('anesthesiaDate')}
+                  />
+                  {openDateField === 'anesthesiaDate' && (
+                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
+                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
+                        </div>
+                      </div>
+                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
+                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {calendarCells.map((day, idx) => {
+                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
+                          const isSelected = !!selectedCalendarDate
+                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
+                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
+                            && selectedCalendarDate.getDate() === day;
+                          return (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => focusAndScroll(document.getElementById('chief-complaint-input'))); }}
+                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex justify-between">
+                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
+                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                  </div>
+                </div>
+              </div>
+
               {/* 主訴（新規：テキスト入力） */}
               <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4 mt-1 md:mt-2">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">主訴</label>
                   <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.chiefComplaint)} bg-white`}
                     id="chief-complaint-input"
-                    placeholder=""
+                    placeholder="主な症状や主訴"
                     value={reportFields.chiefComplaint}
                     onChange={e => setReportFields(v => ({ ...v, chiefComplaint: e.target.value }))}
                   />
@@ -2410,7 +2541,7 @@ ${doctor} 先生
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   id="initial-textarea"
-                  placeholder=""
+                  placeholder="初診時の所見など..."
                   value={reportFields.initialText}
                   onKeyDown={(e) => {
                     if (e.key === 'Tab' && !e.shiftKey) {
@@ -2465,7 +2596,7 @@ ${doctor} 先生
                         const isSelected = reportFields.page2PhotoCategory === item.value;
                         const isHighlighted = dropdownHighlight === idx;
                         return (
-                          <li key={item.value}>
+                          <li key={`${item.value || 'empty'}-${item.label}`}>
                             <button
                               type="button"
                               className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
@@ -2576,7 +2707,7 @@ ${doctor} 先生
                       type="text"
                       size={Math.max(((reportFields as any).page3PhotoLabel || '').length + 1, 10)}
                       className="border-0 outline-none bg-transparent text-base px-0 h-full min-w-[10ch] max-w-[30ch] placeholder:text-slate-400"
-                      placeholder=""
+                      placeholder="術後口腔内写真"
                       value={(reportFields as any).page3PhotoLabel || ''}
                       onChange={e => setReportFields(v => ({ ...v, page3PhotoLabel: e.target.value }))}
                     />
@@ -2693,10 +2824,10 @@ ${doctor} 先生
                           height: "200px",
                           padding: activeCropImageId === img.id ? `${CROP_UI_GUTTER_PX}px` : 0,
                           overflow: "hidden",
-                          borderRadius: "12px",
-                          border: "1px solid #e2e8f0",
-                          background: "#ffffff",
-                          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)"
+                          borderRadius: "12px",        // rounded-xl相当
+                          border: "1px solid #e2e8f0", // border-slate-200相当（薄い枠）
+                          background: "#ffffff",       // 白
+                          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)" // shadow-inner相当
                         }}
                       >
                         <img
@@ -2705,7 +2836,7 @@ ${doctor} 先生
                           alt="画像"
                           style={getImageDisplayStyle(img)}
                         />
-                        {editingImageId === img.id && (
+                        {activeCropImageId === img.id && (
                           <div
                             id={`crop-overlay-${img.id}`}
                             className="absolute"
@@ -2837,43 +2968,7 @@ ${doctor} 先生
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
-                                onClick={async () => {
-                                  const crop = getImageCrop(img);
-                                  if (crop) {
-                                    const image = new window.Image();
-                                    image.src = img.dataUrl;
-                                    await new Promise((res, rej) => {
-                                      image.onload = res;
-                                      image.onerror = rej;
-                                    });
-                                    const cropWidth = crop.right - crop.left;
-                                    const cropHeight = crop.bottom - crop.top;
-                                    const canvas = document.createElement("canvas");
-                                    const ctx = canvas.getContext("2d");
-                                    canvas.width = image.width * cropWidth;
-                                    canvas.height = image.height * cropHeight;
-                                    if (ctx) {
-                                      ctx.drawImage(
-                                        image,
-                                        crop.left * image.width,
-                                        crop.top * image.height,
-                                        cropWidth * image.width,
-                                        cropHeight * image.height,
-                                        0,
-                                        0,
-                                        canvas.width,
-                                        canvas.height
-                                      );
-                                      const newDataUrl = canvas.toDataURL();
-                                      setImages(prev =>
-                                        prev.map(i =>
-                                          i.id === img.id
-                                            ? { ...i, dataUrl: newDataUrl, crop: undefined }
-                                            : i
-                                        )
-                                      );
-                                    }
-                                  }
+                                onClick={() => {
                                   const isLastUnassigned = unassignedImages.length === 1;
                                   updateImageRow(img.id, num);
                                   if (isLastUnassigned) {
@@ -2913,15 +3008,7 @@ ${doctor} 先生
               {isCurrentPageConfirmed ? `画像入れ替え（Page ${currentPage}）` : '段落ドラッグ移動'}
             </h3>
           </div>
-          <RowBoard
-            images={images}
-            setImages={setImages}
-            rows={4}
-            setActiveCropImageId={setActiveCropImageId}
-            onUnassignImage={imgId => {
-              setEditingImageId(imgId);
-            }}
-          />
+          <RowBoard images={images} setImages={setImages} rows={4} />
         </div>
 
         {/* PAGE切替ボタン（段落エリアとプレビューの間） */}
