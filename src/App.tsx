@@ -540,6 +540,8 @@ const App: React.FC = () => {
     3: [],
   });
   const [activeCropImageId, setActiveCropImageId] = useState<string | null>(null);
+  // 編集UI表示専用
+  const [editingImageId, setEditingImageId] = useState<string | null>(null);
   const [activeCropViewportRect, setActiveCropViewportRect] = useState<CropViewportRect | null>(null);
   const cropDragStateRef = useRef<{
     mode: CropDragMode;
@@ -2691,10 +2693,10 @@ ${doctor} 先生
                           height: "200px",
                           padding: activeCropImageId === img.id ? `${CROP_UI_GUTTER_PX}px` : 0,
                           overflow: "hidden",
-                          borderRadius: "12px",        // rounded-xl相当
-                          border: "1px solid #e2e8f0", // border-slate-200相当（薄い枠）
-                          background: "#ffffff",       // 白
-                          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)" // shadow-inner相当
+                          borderRadius: "12px",
+                          border: "1px solid #e2e8f0",
+                          background: "#ffffff",
+                          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)"
                         }}
                       >
                         <img
@@ -2703,7 +2705,7 @@ ${doctor} 先生
                           alt="画像"
                           style={getImageDisplayStyle(img)}
                         />
-                        {activeCropImageId === img.id && (
+                        {editingImageId === img.id && (
                           <div
                             id={`crop-overlay-${img.id}`}
                             className="absolute"
@@ -2835,7 +2837,43 @@ ${doctor} 先生
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
-                                onClick={() => {
+                                onClick={async () => {
+                                  const crop = getImageCrop(img);
+                                  if (crop) {
+                                    const image = new window.Image();
+                                    image.src = img.dataUrl;
+                                    await new Promise((res, rej) => {
+                                      image.onload = res;
+                                      image.onerror = rej;
+                                    });
+                                    const cropWidth = crop.right - crop.left;
+                                    const cropHeight = crop.bottom - crop.top;
+                                    const canvas = document.createElement("canvas");
+                                    const ctx = canvas.getContext("2d");
+                                    canvas.width = image.width * cropWidth;
+                                    canvas.height = image.height * cropHeight;
+                                    if (ctx) {
+                                      ctx.drawImage(
+                                        image,
+                                        crop.left * image.width,
+                                        crop.top * image.height,
+                                        cropWidth * image.width,
+                                        cropHeight * image.height,
+                                        0,
+                                        0,
+                                        canvas.width,
+                                        canvas.height
+                                      );
+                                      const newDataUrl = canvas.toDataURL();
+                                      setImages(prev =>
+                                        prev.map(i =>
+                                          i.id === img.id
+                                            ? { ...i, dataUrl: newDataUrl, crop: undefined }
+                                            : i
+                                        )
+                                      );
+                                    }
+                                  }
                                   const isLastUnassigned = unassignedImages.length === 1;
                                   updateImageRow(img.id, num);
                                   if (isLastUnassigned) {
@@ -2875,7 +2913,15 @@ ${doctor} 先生
               {isCurrentPageConfirmed ? `画像入れ替え（Page ${currentPage}）` : '段落ドラッグ移動'}
             </h3>
           </div>
-          <RowBoard images={images} setImages={setImages} rows={4} />
+          <RowBoard
+            images={images}
+            setImages={setImages}
+            rows={4}
+            setActiveCropImageId={setActiveCropImageId}
+            onUnassignImage={imgId => {
+              setEditingImageId(imgId);
+            }}
+          />
         </div>
 
         {/* PAGE切替ボタン（段落エリアとプレビューの間） */}
