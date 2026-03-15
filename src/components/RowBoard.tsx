@@ -24,16 +24,21 @@ type Props = {
   setImages: React.Dispatch<React.SetStateAction<ImageData[]>>;
   rows?: number;
   setActiveCropImageId?: (id: string) => void;
+  onUnassignImage?: (id: string) => void;
 };
 
 // ✅ 共通カードUI（SortableItem と DragOverlay で使い回す）
-function ItemContent({ img, setImages, setActiveCropImageId }: { img: ImageData; setImages: React.Dispatch<React.SetStateAction<ImageData[]>>; setActiveCropImageId?: (id: string) => void }) {
+function ItemContent({ img, setImages, setActiveCropImageId, onUnassignImage }: { img: ImageData; setImages: React.Dispatch<React.SetStateAction<ImageData[]>>; setActiveCropImageId?: (id: string) => void; onUnassignImage?: (id: string) => void }) {
   const handleDelete = () => {
     setImages(prev => prev.filter(i => i.id !== img.id));
   };
   const handleUnassign = () => {
-    setImages(prev => prev.map(i => i.id === img.id ? { ...i, row: 0 } : i));
-    if (setActiveCropImageId) setActiveCropImageId(img.id);
+    if (onUnassignImage) {
+      onUnassignImage(img.id);
+    } else {
+      setImages(prev => prev.map(i => i.id === img.id ? { ...i, row: 0 } : i));
+      if (setActiveCropImageId) setActiveCropImageId(img.id);
+    }
   };
   return (
     <div
@@ -119,7 +124,7 @@ function ItemContent({ img, setImages, setActiveCropImageId }: { img: ImageData;
 }
 
 // ✅ ドラッグ可能な個別アイテム
-function SortableItem({ img, setImages, setActiveCropImageId }: { img: ImageData; setImages: React.Dispatch<React.SetStateAction<ImageData[]>>; setActiveCropImageId?: (id: string) => void }) {
+function SortableItem({ img, setImages, setActiveCropImageId, onUnassignImage }: { img: ImageData; setImages: React.Dispatch<React.SetStateAction<ImageData[]>>; setActiveCropImageId?: (id: string) => void; onUnassignImage?: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: img.id });
 
@@ -135,13 +140,13 @@ function SortableItem({ img, setImages, setActiveCropImageId }: { img: ImageData
       {...attributes}
       {...listeners}
     >
-      <ItemContent img={img} setImages={setImages} setActiveCropImageId={setActiveCropImageId} />
+      <ItemContent img={img} setImages={setImages} setActiveCropImageId={setActiveCropImageId} onUnassignImage={onUnassignImage} />
     </div>
   );
 }
 
 // ✅ 段落コンテナ（droppable + sortable context）
-function RowContainer({ row, images, setImages, setActiveCropImageId }: { row: number; images: ImageData[]; setImages: React.Dispatch<React.SetStateAction<ImageData[]>>; setActiveCropImageId?: (id: string) => void }) {
+function RowContainer({ row, images, setImages, setActiveCropImageId, onUnassignImage }: { row: number; images: ImageData[]; setImages: React.Dispatch<React.SetStateAction<ImageData[]>>; setActiveCropImageId?: (id: string) => void; onUnassignImage?: (id: string) => void }) {
   const ids = images.map((img) => img.id);
   const { setNodeRef, isOver } = useDroppable({ id: `row-${row}` });
 
@@ -170,7 +175,7 @@ function RowContainer({ row, images, setImages, setActiveCropImageId }: { row: n
           }}
         >
           {images.map((img) => (
-            <SortableItem key={img.id} img={img} setImages={setImages} setActiveCropImageId={setActiveCropImageId} />
+            <SortableItem key={img.id} img={img} setImages={setImages} setActiveCropImageId={setActiveCropImageId} onUnassignImage={onUnassignImage} />
           ))}
         </div>
       </SortableContext>
@@ -178,7 +183,7 @@ function RowContainer({ row, images, setImages, setActiveCropImageId }: { row: n
   );
 }
 
-export default function RowBoard({ images, setImages, rows = 4, setActiveCropImageId }: Props) {
+export default function RowBoard({ images, setImages, rows = 4, setActiveCropImageId, onUnassignImage }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // ✅ ドラッグ中アイテムの現在行（stale closure 回避のため ref で管理）
   const activeItemRowRef = useRef<number | null>(null);
@@ -367,7 +372,7 @@ export default function RowBoard({ images, setImages, rows = 4, setActiveCropIma
     >
       <div style={{ display: "grid", gap: 12 }}>
         {Array.from({ length: rows }, (_, i) => i + 1).map((row) => (
-          <RowContainer key={row} row={row} images={byRow.get(row) ?? []} setImages={setImages} setActiveCropImageId={setActiveCropImageId} />
+          <RowContainer key={row} row={row} images={byRow.get(row) ?? []} setImages={setImages} setActiveCropImageId={setActiveCropImageId} onUnassignImage={onUnassignImage} />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>
