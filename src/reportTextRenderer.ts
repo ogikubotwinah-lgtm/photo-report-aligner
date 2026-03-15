@@ -388,17 +388,27 @@ if (textCfg.HOSPITAL_EMAIL) {
     const refHospX = slideOffsetX + textCfg.REF_HOSPITAL.x * pxPerCm;
     const refHospY = slideOffsetY + textCfg.REF_HOSPITAL.y * pxPerCm;
     const hospName = reportFields.refHospital || '○○動物病院';
-    const docName = reportFields.refDoctor || '△△';
-    svgParts.push(
-      `  <text x="${refHospX}" y="${refHospY}" font-size="${ptToPx(
-        13.5
-      )}" fill="#000" font-family="HGP明朝B" dominant-baseline="hanging" text-anchor="start" >` +
-        `<tspan text-decoration="underline">${escapeXml(hospName)}</tspan>` +
-        `<tspan>　</tspan>` +
-        `<tspan text-decoration="underline">${escapeXml(docName)}</tspan>` +
-        `<tspan> 先生</tspan>` +
-      `</text>`
-    );
+    const docName = (reportFields.refDoctor || '').trim();
+    if (docName) {
+      svgParts.push(
+        `  <text x="${refHospX}" y="${refHospY}" font-size="${ptToPx(
+          13.5
+        )}" fill="#000" font-family="HGP明朝B" dominant-baseline="hanging" text-anchor="start" >` +
+          `<tspan text-decoration="underline">${escapeXml(hospName)}</tspan>` +
+          `<tspan>　</tspan>` +
+          `<tspan text-decoration="underline">${escapeXml(docName)}</tspan>` +
+          `<tspan> 先生</tspan>` +
+        `</text>`
+      );
+    } else {
+      svgParts.push(
+        `  <text x="${refHospX}" y="${refHospY}" font-size="${ptToPx(
+          13.5
+        )}" fill="#000" font-family="HGP明朝B" dominant-baseline="hanging" text-anchor="start" >` +
+          `<tspan text-decoration="underline">${escapeXml(hospName)}</tspan>` +
+        `</text>`
+      );
+    }
 
     // 3) 担当獣医師（ラベル＋名前下線）
     if (reportFields.attendingVet) {
@@ -1013,21 +1023,35 @@ if (textCfg.HOSPITAL_EMAIL) {
 
     // 2) 紹介病院 + 先生名を同じ行（1行固定、13.5pt HGP明朝B）下線はそれぞれ
     const hospName2 = reportFields.refHospital || '○○動物病院';
-    const docName2 = reportFields.refDoctor || '△△';
-    slide.addText([
-      { text: hospName2, options: { underline: true } },
-      { text: '　' },
-      { text: docName2, options: { underline: true } },
-      { text: ' 先生' }
-    ] as any, {
-      x: cmToInch(textCfg.REF_HOSPITAL.x),
-      y: cmToInch(textCfg.REF_HOSPITAL.y),
-      w: cmToInch(textCfg.REF_HOSPITAL.w),
-      h: cmToInch(textCfg.REF_HOSPITAL.h),
-      fontSize: 13.5,
-      fontFace: 'HGP明朝B',
-      wrap: false
-    });
+    const docName2 = (reportFields.refDoctor || '').trim();
+    if (docName2) {
+      slide.addText([
+        { text: hospName2, options: { underline: true } },
+        { text: '　' },
+        { text: docName2, options: { underline: true } },
+        { text: ' 先生' }
+      ] as any, {
+        x: cmToInch(textCfg.REF_HOSPITAL.x),
+        y: cmToInch(textCfg.REF_HOSPITAL.y),
+        w: cmToInch(textCfg.REF_HOSPITAL.w),
+        h: cmToInch(textCfg.REF_HOSPITAL.h),
+        fontSize: 13.5,
+        fontFace: 'HGP明朝B',
+        wrap: false
+      });
+    } else {
+      slide.addText([
+        { text: hospName2, options: { underline: true } }
+      ] as any, {
+        x: cmToInch(textCfg.REF_HOSPITAL.x),
+        y: cmToInch(textCfg.REF_HOSPITAL.y),
+        w: cmToInch(textCfg.REF_HOSPITAL.w),
+        h: cmToInch(textCfg.REF_HOSPITAL.h),
+        fontSize: 13.5,
+        fontFace: 'HGP明朝B',
+        wrap: false
+      });
+    }
 
     // 4) 担当獣医師（ラベル＋名前下線＋印鑑）
 // 担当獣医師（ラベル）
