@@ -2968,7 +2968,29 @@ ${doctor} 先生
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
-                                onClick={() => {
+                                onClick={async () => {
+                                  // crop情報があればcanvasで切り抜き
+                                  const crop = getImageCrop(img);
+                                  if (crop) {
+                                    const imageEl = new window.Image();
+                                    imageEl.src = img.dataUrl;
+                                    await new Promise((res, rej) => { imageEl.onload = res; imageEl.onerror = rej; });
+                                    const sx = Math.round(crop.left * imageEl.width);
+                                    const sy = Math.round(crop.top * imageEl.height);
+                                    const sw = Math.round((crop.right - crop.left) * imageEl.width);
+                                    const sh = Math.round((crop.bottom - crop.top) * imageEl.height);
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = sw;
+                                    canvas.height = sh;
+                                    const ctx = canvas.getContext('2d');
+                                    if (ctx) {
+                                      ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, sw, sh);
+                                      const croppedDataUrl = canvas.toDataURL();
+                                      setImages((prev: ImageData[]) => prev.map(i =>
+                                        i.id === img.id ? { ...i, dataUrl: croppedDataUrl, crop: undefined } : i
+                                      ));
+                                    }
+                                  }
                                   const isLastUnassigned = unassignedImages.length === 1;
                                   updateImageRow(img.id, num);
                                   if (isLastUnassigned) {
