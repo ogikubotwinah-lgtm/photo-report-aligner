@@ -9,9 +9,6 @@ export interface ImageData {
   row: number; // 0: Unassigned, 1-4: Assigned rows
   orderConfirmed: boolean; // Whether the position within the row is confirmed
   rotation: number; // 0, 90, 180, 270 degrees
-  originalDataUrl?: string;
-  originalWidth?: number;
-  originalHeight?: number;
 }
 
 export interface LayoutOptions {
