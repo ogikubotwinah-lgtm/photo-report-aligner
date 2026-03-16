@@ -1520,7 +1520,7 @@ ${doctor} 先生
 
       const pdfBlob = pdf.output('blob');
 
-      const formData = new FormData();
+      const formData =
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
@@ -2046,6 +2046,7 @@ ${doctor} 先生
                       className="input input-xs w-28"
                       value={reportFields.reportDate || ""}
                       onFocus={() => openCalendar("reportDate")}
+                      onClick={() => openCalendar("reportDate")}
                       readOnly
                       data-date-field
                     />
@@ -2053,23 +2054,9 @@ ${doctor} 先生
                       <div className="absolute z-20 mt-1 left-0">
                         <div className="bg-white border rounded shadow-lg p-2 w-64">
                           <div className="flex items-center justify-between mb-2">
-                            <button
-                              type="button"
-                              className="btn btn-xs"
-                              onClick={() => moveCalendarMonth(-1)}
-                            >
-                              &lt;
-                            </button>
-                            <span className="font-bold text-sm">
-                              {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
-                            </span>
-                            <button
-                              type="button"
-                              className="btn btn-xs"
-                              onClick={() => moveCalendarMonth(1)}
-                            >
-                              &gt;
-                            </button>
+                            <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                            <span className="font-bold text-sm">{calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月</span>
+                            <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
                           </div>
                           <div className="grid grid-cols-7 gap-1 text-xs mb-1">
                             <div className="text-center text-slate-400">日</div>
@@ -2095,20 +2082,8 @@ ${doctor} 先生
                             )}
                           </div>
                           <div className="flex justify-between mt-2">
-                            <button
-                              type="button"
-                              className="btn btn-xs btn-outline"
-                              onClick={clearCalendarDate}
-                            >
-                              クリア
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-xs btn-outline"
-                              onClick={closeCalendar}
-                            >
-                              閉じる
-                            </button>
+                            <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                            <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
                           </div>
                         </div>
                       </div>
@@ -2133,10 +2108,7 @@ ${doctor} 先生
               <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">
-                      紹介病院名
-                    </label>
-
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">紹介病院名</label>
                     <input
                       id="ref-hospital-input"
                       className={`w-full max-w-[520px] h-11 px-3 py-2 rounded-xl border text-base ${getEmptyFieldToneClass(refHospitalInput)} bg-white`}
@@ -2167,14 +2139,11 @@ ${doctor} 先生
                       }}
                       list="refHospitalsList"
                     />
-
-                    {/* 入力候補（予測変換） */}
                     <datalist id="refHospitalsList">
                       {suggestions.refHospitals.map((h) => (
                         <option key={h} value={h} />
                       ))}
                     </datalist>
-
                     {shouldShowRegisterRefHospitalButton && (
                       <button
                         type="button"
@@ -2185,16 +2154,171 @@ ${doctor} 先生
                         {isSavingRefHospital ? '登録中...' : 'この病院を登録'}
                       </button>
                     )}
-
                     {showHospitalSavedMessage && (
                       <div className="text-sm text-emerald-600 mt-1">登録しました</div>
                     )}
-
-                    {/* 保存エラー（任意表示） */}
                     {refHospitalError && (
                       <div className="text-sm text-red-600">{refHospitalError}</div>
                     )}
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        className="input input-xs w-28"
+                        value={reportFields.firstVisitDate || ""}
+                        onFocus={() => openCalendar("firstVisitDate")}
+                        onClick={() => openCalendar("firstVisitDate")}
+                        readOnly
+                        data-date-field
+                      />
+                      {openDateField === "firstVisitDate" && (
+                        <div className="absolute z-20 mt-1 left-0">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                            <div className="flex items-center justify-between mb-2">
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <span className="font-bold text-sm">{calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月</span>
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-xs mb-1">
+                              <div className="text-center text-slate-400">日</div>
+                              <div className="text-center text-slate-400">月</div>
+                              <div className="text-center text-slate-400">火</div>
+                              <div className="text-center text-slate-400">水</div>
+                              <div className="text-center text-slate-400">木</div>
+                              <div className="text-center text-slate-400">金</div>
+                              <div className="text-center text-slate-400">土</div>
+                              {calendarCells.map((cell, idx) =>
+                                cell === null ? (
+                                  <div key={idx} />
+                                ) : (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    onClick={() => selectCalendarDate(cell)}
+                                  >
+                                    {cell}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                            <div className="flex justify-between mt-2">
+                              <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                              <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        className="input input-xs w-28"
+                        value={reportFields.sedationDate || ""}
+                        onFocus={() => openCalendar("sedationDate")}
+                        onClick={() => openCalendar("sedationDate")}
+                        readOnly
+                        data-date-field
+                      />
+                      {openDateField === "sedationDate" && (
+                        <div className="absolute z-20 mt-1 left-0">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                            <div className="flex items-center justify-between mb-2">
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <span className="font-bold text-sm">{calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月</span>
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-xs mb-1">
+                              <div className="text-center text-slate-400">日</div>
+                              <div className="text-center text-slate-400">月</div>
+                              <div className="text-center text-slate-400">火</div>
+                              <div className="text-center text-slate-400">水</div>
+                              <div className="text-center text-slate-400">木</div>
+                              <div className="text-center text-slate-400">金</div>
+                              <div className="text-center text-slate-400">土</div>
+                              {calendarCells.map((cell, idx) =>
+                                cell === null ? (
+                                  <div key={idx} />
+                                ) : (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    onClick={() => selectCalendarDate(cell)}
+                                  >
+                                    {cell}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                            <div className="flex justify-between mt-2">
+                              <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                              <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        className="input input-xs w-28"
+                        value={reportFields.anesthesiaDate || ""}
+                        onFocus={() => openCalendar("anesthesiaDate")}
+                        onClick={() => openCalendar("anesthesiaDate")}
+                        readOnly
+                        data-date-field
+                      />
+                      {openDateField === "anesthesiaDate" && (
+                        <div className="absolute z-20 mt-1 left-0">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                            <div className="flex items-center justify-between mb-2">
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <span className="font-bold text-sm">{calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月</span>
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-xs mb-1">
+                              <div className="text-center text-slate-400">日</div>
+                              <div className="text-center text-slate-400">月</div>
+                              <div className="text-center text-slate-400">火</div>
+                              <div className="text-center text-slate-400">水</div>
+                              <div className="text-center text-slate-400">木</div>
+                              <div className="text-center text-slate-400">金</div>
+                              <div className="text-center text-slate-400">土</div>
+                              {calendarCells.map((cell, idx) =>
+                                cell === null ? (
+                                  <div key={idx} />
+                                ) : (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    onClick={() => selectCalendarDate(cell)}
+                                  >
+                                    {cell}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                            <div className="flex justify-between mt-2">
+                              <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                              <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* ...他の基本情報項目... */}
+                </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">紹介病院メールアドレス</label>
                     <input id="ref-hospital-email" className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail)} bg-white`}
