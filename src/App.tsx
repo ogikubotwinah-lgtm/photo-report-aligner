@@ -696,6 +696,18 @@ const [page1Confirmed, setPage1Confirmed] = useState(false);
 const [page2Confirmed, setPage2Confirmed] = useState(false);
 const [page3Confirmed, setPage3Confirmed] = useState(false);
 
+const handleUnassignImage = useCallback((id: string) => {
+  setImages((prev: ImageData[]) =>
+    prev.map(i => (i.id === id ? { ...i, row: 0 } : i))
+  );
+
+  setActiveCropImageId(id);
+
+  if (currentPage === 1) setPage1Confirmed(false);
+  if (currentPage === 2) setPage2Confirmed(false);
+  if (currentPage === 3) setPage3Confirmed(false);
+}, [currentPage, setImages]);
+
 // PAGE2を出力に含めるか（PAGE3追加時のみ有効）
 const [includePage2InExport, setIncludePage2InExport] = useState(true);
 
@@ -3030,7 +3042,13 @@ ${doctor} 先生
               {isCurrentPageConfirmed ? `画像入れ替え（Page ${currentPage}）` : '段落ドラッグ移動'}
             </h3>
           </div>
-          <RowBoard images={images} setImages={setImages} rows={4} />
+          <RowBoard
+  images={images}
+  setImages={setImages}
+  rows={4}
+  setActiveCropImageId={setActiveCropImageId}
+  onUnassignImage={handleUnassignImage}
+/>
         </div>
 
         {/* PAGE切替ボタン（段落エリアとプレビューの間） */}
