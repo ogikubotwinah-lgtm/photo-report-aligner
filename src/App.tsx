@@ -772,7 +772,10 @@ useEffect(() => {
                 mimeType: file.type,
                 row: 0,
                 orderConfirmed: false,
-                rotation: 0
+                rotation: 0,
+                originalDataUrl: dataUrl,
+                originalWidth: img.width,
+                originalHeight: img.height
               });
             };
             img.src = dataUrl;
@@ -836,6 +839,18 @@ useEffect(() => {
     setImages((prev: ImageData[]) => {
       return prev.map((img) => {
         if (img.id !== id) return img;
+        if (img.originalDataUrl) {
+          return {
+            ...img,
+            dataUrl: img.originalDataUrl,
+            width: img.originalWidth ?? img.width,
+            height: img.originalHeight ?? img.height,
+            crop: undefined,
+            originalDataUrl: undefined,
+            originalWidth: undefined,
+            originalHeight: undefined,
+          };
+        }
         return { ...img, crop: undefined } as ImageData;
       });
     });
@@ -1511,8 +1526,8 @@ ${doctor} 先生
       formData.append('file', new File([pdfBlob], 'Photo_Report_A4.pdf', { type: 'application/pdf' }));
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/create-draft`, {
-        method: 'POST',
-        body: formData,
+      method: 'POST',
+      body: formData,
       });
 
       const data = await response.json().catch(() => ({}));
@@ -2056,10 +2071,10 @@ ${doctor} 先生
                             type="button"
                             onClick={() => selectCalendarDate(day)}
                             className={`h-8 rounded-lg text-base font-medium transition-colors ${
-                              isSelected
-                                ? 'bg-orange-500 text-white'
-                                : 'text-slate-700 hover:bg-slate-100'
-                            }`}
+                                isSelected
+                                  ? 'bg-orange-500 text-white'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
                           >
                             {day}
                           </button>
@@ -2276,167 +2291,6 @@ ${doctor} 先生
                 </div>
               </div>
 
-              <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
-                    <div className="relative" data-date-field="firstVisitDate">
-                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)} bg-white`}
-                    placeholder="202X年XX月XX日"
-                    value={reportFields.firstVisitDate}
-                    readOnly
-                    onClick={() => openCalendar('firstVisitDate')}
-                  />
-                  {openDateField === 'firstVisitDate' && (
-                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
-                        <div className="flex items-center gap-1">
-                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
-                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
-                        </div>
-                      </div>
-                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
-                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
-                      </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {calendarCells.map((day, idx) => {
-                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
-                          const isSelected = !!selectedCalendarDate
-                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
-                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
-                            && selectedCalendarDate.getDate() === day;
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('sedationDate')); }}
-                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
-                                isSelected
-                                  ? 'bg-orange-500 text-white'
-                                  : 'text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {day}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-3 flex justify-between">
-                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
-                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
-                    <div className="relative" data-date-field="sedationDate">
-                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)} bg-white`}
-                    placeholder="202X年XX月XX日"
-                    value={reportFields.sedationDate || ''}
-                    readOnly
-                    onClick={() => openCalendar('sedationDate')}
-                  />
-                  {openDateField === 'sedationDate' && (
-                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
-                        <div className="flex items-center gap-1">
-                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
-                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
-                        </div>
-                      </div>
-                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
-                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
-                      </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {calendarCells.map((day, idx) => {
-                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
-                          const isSelected = !!selectedCalendarDate
-                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
-                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
-                            && selectedCalendarDate.getDate() === day;
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => openCalendar('anesthesiaDate')); }}
-                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
-                                isSelected
-                                  ? 'bg-orange-500 text-white'
-                                  : 'text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {day}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-3 flex justify-between">
-                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
-                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
-                    <div className="relative" data-date-field="anesthesiaDate">
-                  <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)} bg-white`}
-                    placeholder="202X年XX月XX日"
-                    value={reportFields.anesthesiaDate}
-                    readOnly
-                    onClick={() => openCalendar('anesthesiaDate')}
-                  />
-                  {openDateField === 'anesthesiaDate' && (
-                    <div className="absolute left-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="text-lg font-bold text-slate-800">{calendarMonth.getFullYear()}年 {calendarMonth.getMonth() + 1}月</div>
-                        <div className="flex items-center gap-1">
-                          <button type="button" onClick={() => moveCalendarMonth(-1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">‹</button>
-                          <button type="button" onClick={() => moveCalendarMonth(1)} className="h-7 w-7 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">›</button>
-                        </div>
-                      </div>
-                      <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-500">
-                        {['日', '月', '火', '水', '木', '金', '土'].map(day => <span key={day}>{day}</span>)}
-                      </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {calendarCells.map((day, idx) => {
-                          if (!day) return <span key={`empty-${idx}`} className="h-8" />;
-                          const isSelected = !!selectedCalendarDate
-                            && selectedCalendarDate.getFullYear() === calendarMonth.getFullYear()
-                            && selectedCalendarDate.getMonth() === calendarMonth.getMonth()
-                            && selectedCalendarDate.getDate() === day;
-                          return (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => { selectCalendarDate(day); requestAnimationFrame(() => focusAndScroll(document.getElementById('chief-complaint-input'))); }}
-                              className={`h-8 rounded-lg text-base font-medium transition-colors ${
-                                isSelected
-                                  ? 'bg-orange-500 text-white'
-                                  : 'text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {day}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-3 flex justify-between">
-                        <button type="button" onClick={clearCalendarDate} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-400 hover:bg-slate-50">クリア</button>
-                        <button type="button" onClick={closeCalendar} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-600 hover:bg-slate-50">閉じる</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                  </div>
-                </div>
-              </div>
-
               {/* 主訴（新規：テキスト入力） */}
               <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4 mt-1 md:mt-2">
                 <div className="space-y-1">
@@ -2608,7 +2462,7 @@ ${doctor} 先生
                         const isSelected = reportFields.page2PhotoCategory === item.value;
                         const isHighlighted = dropdownHighlight === idx;
                         return (
-                          <li key={`${item.value || 'empty'}-${item.label}`}>
+                          <li key={item.value}>
                             <button
                               type="button"
                               className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
