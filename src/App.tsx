@@ -358,6 +358,20 @@ const App: React.FC = () => {
 
   // ページ管理
   const [currentPage, setCurrentPage] = useState<number>(1);
+  // スクロール用 ref
+  const pageButtonRef = useRef<HTMLDivElement | null>(null);
+  const imageEditSectionRef = useRef<HTMLDivElement | null>(null);
+  const rowBoardSectionRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToRef = useCallback((ref: React.RefObject<HTMLElement | null>, offset = 28) => {
+  if (!ref.current) return;
+  const rect = ref.current.getBoundingClientRect();
+  const scrollY = window.scrollY + rect.top - offset;
+  window.scrollTo({
+    top: scrollY,
+    behavior: 'smooth',
+  });
+}, []);
 
   const [reportFieldsHydrated, setReportFieldsHydrated] = useState(false);
 
@@ -697,16 +711,19 @@ const [page2Confirmed, setPage2Confirmed] = useState(false);
 const [page3Confirmed, setPage3Confirmed] = useState(false);
 
 const handleUnassignImage = useCallback((id: string) => {
+  console.log('APP handleUnassignImage', id);
+
   setImages((prev: ImageData[]) =>
-    prev.map(i => (i.id === id ? { ...i, row: 0 } : i))
+    prev.map((i: ImageData) => (i.id === id ? { ...i, row: 0 } : i))
   );
 
-  setActiveCropImageId(id);
+    setActiveCropImageId(id);
 
   if (currentPage === 1) setPage1Confirmed(false);
   if (currentPage === 2) setPage2Confirmed(false);
   if (currentPage === 3) setPage3Confirmed(false);
-}, [currentPage, setImages]);
+
+}, [currentPage, setImages, setActiveCropImageId]);
 
 // PAGE2を出力に含めるか（PAGE3追加時のみ有効）
 const [includePage2InExport, setIncludePage2InExport] = useState(true);
@@ -2999,7 +3016,18 @@ ${doctor} 先生
                                       ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, sw, sh);
                                       const croppedDataUrl = canvas.toDataURL();
                                       setImages((prev: ImageData[]) => prev.map(i =>
-                                        i.id === img.id ? { ...i, dataUrl: croppedDataUrl, crop: undefined } : i
+                                       i.id === img.id
+                                        ? {
+                                          ...i,
+                                          dataUrl: croppedDataUrl,
+                                          width: sw,
+                                          height: sh,
+                                          crop: undefined,
+                                          originalDataUrl: i.originalDataUrl ?? i.dataUrl,
+                                          originalWidth: i.originalWidth ?? i.width,
+                                          originalHeight: i.originalHeight ?? i.height,
+                                         }
+                                        : i
                                       ));
                                     }
                                   }
@@ -3036,19 +3064,25 @@ ${doctor} 先生
         )}
 
         {/* 段落ドラッグ移動 */}
-        <div ref={rowBoardRef} className="lg:col-span-12 bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-4">
+        <div
+  ref={(el) => {
+    rowBoardRef.current = el;
+    rowBoardSectionRef.current = el;
+  }}
+  className="lg:col-span-12 bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 space-y-4"
+>
           <div className="flex items-center gap-3 mb-4 flex-wrap">
             <h3 className="inline-flex items-center gap-2 px-4 py-2 rounded-full border text-lg font-semibold shadow-sm bg-sky-50 border-sky-200 text-sky-700">
               {isCurrentPageConfirmed ? `画像入れ替え（Page ${currentPage}）` : '段落ドラッグ移動'}
             </h3>
           </div>
           <RowBoard
-  images={images}
-  setImages={setImages}
-  rows={4}
-  setActiveCropImageId={setActiveCropImageId}
-  onUnassignImage={handleUnassignImage}
-/>
+           images={images}
+           setImages={setImages}
+           rows={4}
+           setActiveCropImageId={setActiveCropImageId}
+           onUnassignImage={handleUnassignImage}
+         />
         </div>
 
         {/* PAGE切替ボタン（段落エリアとプレビューの間） */}
