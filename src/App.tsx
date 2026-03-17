@@ -846,13 +846,11 @@ useEffect(() => {
         if (img.originalDataUrl) {
           return {
             ...img,
-            dataUrl: img.originalDataUrl,
+            dataUrl: img.originalDataUrl ?? img.dataUrl,
             width: img.originalWidth ?? img.width,
             height: img.originalHeight ?? img.height,
-            crop: undefined,
-            originalDataUrl: undefined,
-            originalWidth: undefined,
-            originalHeight: undefined,
+            crop: undefined
+            // original系は絶対に触らない
           };
         }
         return { ...img, crop: undefined } as ImageData;
@@ -2855,7 +2853,7 @@ ${doctor} 先生
 
         {/* 左カラム - 確定前のみ表示 */}
         {!isCurrentPageConfirmed && (
-          <div className="lg:col-span-12 space-y-8">
+          <div className="lg:col-span-12 space-y-8 flex flex-col">
             <LayoutControls options={options} setOptions={setOptions} />
 
             <div className="w-full max-w-5xl mx-auto bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden space-y-8 relative">
@@ -2872,7 +2870,7 @@ ${doctor} 先生
                   )}
                 </div>
 
-                <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                <div className="space-y-4 flex-1 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                   {unassignedImages.map(img => (
                     <div
                       key={img.id}
@@ -2974,60 +2972,63 @@ ${doctor} 先生
                         )}
                       </div>
 
-                      <div className="w-[160px] flex-shrink-0">
-                        <div className="flex flex-col gap-2">
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => rotateImage(img.id, "left")}
-                              className="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                            >
-                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => rotateImage(img.id, 'right')}
-                              className="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                            >
-                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 4v5h-.582m-15.356 2A8.001 8.001 0 0119.418 9m0 0H15" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => removeImage(img.id)}
-                              className="w-12 h-12 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                            >
-                              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
-                            className={`h-10 rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
-                              activeCropImageId === img.id
-                                ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                            }`}
-                          >
-                            {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
-                          </button>
-                          {activeCropImageId === img.id && (
-                            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
-                              <div className="text-xs text-emerald-800">四隅ハンドルをドラッグして範囲を調整</div>
+                      <div className="w-[220px] flex-shrink-0">
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* 左列：操作系 */}
+                          <div className="flex flex-col gap-2">
+                            <div className="flex gap-2">
                               <button
-                                onClick={() => {
-                                  recordHistory();
-                                  resetImageCrop(img.id);
-                                }}
-                                className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
-                                title="リセット"
+                                onClick={() => rotateImage(img.id, "left")}
+                                className="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
                               >
-                                リセット
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => rotateImage(img.id, 'right')}
+                                className="w-12 h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                              >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 4v5h-.582m-15.356 2A8.001 8.001 0 0119.418 9m0 0H15" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => removeImage(img.id)}
+                                className="w-12 h-12 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                              >
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
                               </button>
                             </div>
-                          )}
-                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
+                              className={`h-10 rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
+                                activeCropImageId === img.id
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
+                            </button>
+                            {activeCropImageId === img.id && (
+                              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
+                                <button
+                                  onClick={() => {
+                                    recordHistory();
+                                    resetImageCrop(img.id);
+                                  }}
+                                  className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
+                                  title="リセット"
+                                >
+                                  リセット
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          {/* 右列：数字ボタン */}
+                          <div className="flex flex-col gap-1.5 justify-between min-h-[180px] items-stretch">
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
