@@ -2140,166 +2140,255 @@ ${doctor} 先生
               <div className="sm:col-span-2 lg:col-span-3 text-base font-semibold text-slate-700">基本情報</div>
               <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {/* --- 日付3項目 --- */}
-                                    <div className="space-y-1">
-                                      <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
-                                      <div className="relative" data-date-field="firstVisitDate">
-                                        <input
-                                          className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)} bg-white`}
-                                          placeholder="202X年XX月XX日"
-                                          value={reportFields.firstVisitDate}
-                                          readOnly
-                                          onClick={() => openCalendar("firstVisitDate")}
-                                          data-date-field
-                                        />
-                                        {openDateField === "firstVisitDate" && (
-                                          <div className="absolute z-20 mt-1 left-0">
-                                            <div className="bg-white border rounded shadow-lg p-2 w-64">
-                                              <div className="flex items-center justify-between mb-2">
-                                                <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
-                                                <span className="font-bold text-sm">
-                                                  {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
-                                                </span>
-                                                <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
-                                              </div>
-                                              <div className="grid grid-cols-7 gap-1 text-xs mb-1">
-                                                <div className="text-center text-slate-400">日</div>
-                                                <div className="text-center text-slate-400">月</div>
-                                                <div className="text-center text-slate-400">火</div>
-                                                <div className="text-center text-slate-400">水</div>
-                                                <div className="text-center text-slate-400">木</div>
-                                                <div className="text-center text-slate-400">金</div>
-                                                <div className="text-center text-slate-400">土</div>
-                                                {calendarCells.map((cell, idx) =>
-                                                  cell === null ? (
-                                                    <div key={idx} />
-                                                  ) : (
-                                                    <button
-                                                      key={idx}
-                                                      type="button"
-                                                      className="w-7 h-7 rounded hover:bg-blue-100 text-center"
-                                                      onClick={() => selectCalendarDate(cell)}
-                                                    >
-                                                      {cell}
-                                                    </button>
-                                                  )
-                                                )}
-                                              </div>
-                                              <div className="flex justify-between mt-2">
-                                                <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
-                                                <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
-                                      <div className="relative" data-date-field="sedationDate">
-                                        <input
-                                          className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)} bg-white`}
-                                          placeholder="202X年XX月XX日"
-                                          value={reportFields.sedationDate}
-                                          readOnly
-                                          onClick={() => openCalendar("sedationDate")}
-                                          data-date-field
-                                        />
-                                        {openDateField === "sedationDate" && (
-                                          <div className="absolute z-20 mt-1 left-0">
-                                            <div className="bg-white border rounded shadow-lg p-2 w-64">
-                                              <div className="flex items-center justify-between mb-2">
-                                                <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
-                                                <span className="font-bold text-sm">
-                                                  {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
-                                                </span>
-                                                <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
-                                              </div>
-                                              <div className="grid grid-cols-7 gap-1 text-xs mb-1">
-                                                <div className="text-center text-slate-400">日</div>
-                                                <div className="text-center text-slate-400">月</div>
-                                                <div className="text-center text-slate-400">火</div>
-                                                <div className="text-center text-slate-400">水</div>
-                                                <div className="text-center text-slate-400">木</div>
-                                                <div className="text-center text-slate-400">金</div>
-                                                <div className="text-center text-slate-400">土</div>
-                                                {calendarCells.map((cell, idx) =>
-                                                  cell === null ? (
-                                                    <div key={idx} />
-                                                  ) : (
-                                                    <button
-                                                      key={idx}
-                                                      type="button"
-                                                      className="w-7 h-7 rounded hover:bg-blue-100 text-center"
-                                                      onClick={() => selectCalendarDate(cell)}
-                                                    >
-                                                      {cell}
-                                                    </button>
-                                                  )
-                                                )}
-                                              </div>
-                                              <div className="flex justify-between mt-2">
-                                                <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
-                                                <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
-                                      <div className="relative" data-date-field="anesthesiaDate">
-                                        <input
-                                          className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)} bg-white`}
-                                          placeholder="202X年XX月XX日"
-                                          value={reportFields.anesthesiaDate}
-                                          readOnly
-                                          onClick={() => openCalendar("anesthesiaDate")}
-                                          data-date-field
-                                        />
-                                        {openDateField === "anesthesiaDate" && (
-                                          <div className="absolute z-20 mt-1 left-0">
-                                            <div className="bg-white border rounded shadow-lg p-2 w-64">
-                                              <div className="flex items-center justify-between mb-2">
-                                                <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
-                                                <span className="font-bold text-sm">
-                                                  {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
-                                                </span>
-                                                <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
-                                              </div>
-                                              <div className="grid grid-cols-7 gap-1 text-xs mb-1">
-                                                <div className="text-center text-slate-400">日</div>
-                                                <div className="text-center text-slate-400">月</div>
-                                                <div className="text-center text-slate-400">火</div>
-                                                <div className="text-center text-slate-400">水</div>
-                                                <div className="text-center text-slate-400">木</div>
-                                                <div className="text-center text-slate-400">金</div>
-                                                <div className="text-center text-slate-400">土</div>
-                                                {calendarCells.map((cell, idx) =>
-                                                  cell === null ? (
-                                                    <div key={idx} />
-                                                  ) : (
-                                                    <button
-                                                      key={idx}
-                                                      type="button"
-                                                      className="w-7 h-7 rounded hover:bg-blue-100 text-center"
-                                                      onClick={() => selectCalendarDate(cell)}
-                                                    >
-                                                      {cell}
-                                                    </button>
-                                                  )
-                                                )}
-                                              </div>
-                                              <div className="flex justify-between mt-2">
-                                                <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
-                                                <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
+                  {/* 飼い主姓／ペット名／担当獣医師ブロック（先頭へ移動） */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">飼い主姓</label>
+                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.ownerLastName)} bg-white`}
+                      placeholder="山田"
+                      value={reportFields.ownerLastName}
+                      onChange={e => setReportFields(v => ({ ...v, ownerLastName: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">ペット名</label>
+                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.petName)} bg-white`}
+                      placeholder="タロウ"
+                      value={reportFields.petName}
+                      onChange={e => setReportFields(v => ({ ...v, petName: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Tab' && !e.shiftKey) {
+                          shouldOpenAttendingVetOnFocusRef.current = true;
+                        }
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          shouldOpenAttendingVetOnFocusRef.current = true;
+                          requestAnimationFrame(() => focusAndScroll(document.getElementById('attending-vet-btn')));
+                        }
+                      }}
+                    />
+                  </div>
+                  {/* 担当獣医師（新規：プルダウン） */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">担当獣医師</label>
+                    <div className="relative" ref={attendingVetDropdownRef}>
+                      <button
+                        id="attending-vet-btn"
+                        type="button"
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.attendingVet)} bg-white`}
+                        aria-haspopup="listbox"
+                        aria-expanded={isAttendingVetDropdownOpen}
+                        onFocus={() => {
+                          if (!shouldOpenAttendingVetOnFocusRef.current) return;
+                          shouldOpenAttendingVetOnFocusRef.current = false;
+                          setIsAttendingVetDropdownOpen(true);
+                          setDropdownHighlight(0);
+                        }}
+                        onClick={() => { setIsAttendingVetDropdownOpen(v => !v); setDropdownHighlight(-1); }}
+                        onKeyDown={isAttendingVetDropdownOpen ? (e) => {
+                          const items = ['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
+                          handleDropdownKeyDown(e, items.length, (idx) => {
+                            const name = items[idx];
+                            setReportFields(v => ({ ...v, attendingVet: name }));
+                            setIsAttendingVetDropdownOpen(false);
+                            if (name) requestAnimationFrame(() => openCalendar('firstVisitDate'));
+                          }, () => setIsAttendingVetDropdownOpen(false));
+                        } : undefined}
+                      >
+                        <span className={reportFields.attendingVet ? 'text-slate-900' : 'text-slate-500'}>
+                          {reportFields.attendingVet || '選択してください'}
+                        </span>
+                      </button>
+                      {isAttendingVetDropdownOpen && (
+                        <ul
+                          role="listbox"
+                          className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                        >
+                          {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
+                            const label = name || '選択してください';
+                            const isSelected = reportFields.attendingVet === name;
+                            const isHighlighted = dropdownHighlight === idx;
+                            return (
+                              <li key={label}>
+                                <button
+                                  type="button"
+                                  className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                                  onClick={() => {
+                                    setReportFields(v => ({ ...v, attendingVet: name }));
+                                    setIsAttendingVetDropdownOpen(false);
+                                    if (name) {
+                                      requestAnimationFrame(() => openCalendar('firstVisitDate'));
+                                    }
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                  {/* --- 日付3項目 --- */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
+                    <div className="relative" data-date-field="firstVisitDate">
+                      <input
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)} bg-white`}
+                        placeholder="202X年XX月XX日"
+                        value={reportFields.firstVisitDate}
+                        readOnly
+                        onClick={() => openCalendar("firstVisitDate")}
+                        data-date-field
+                      />
+                      {openDateField === "firstVisitDate" && (
+                        <div className="absolute z-20 mt-1 left-0">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                            <div className="flex items-center justify-between mb-2">
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <span className="font-bold text-sm">
+                                {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
+                              </span>
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-xs mb-1">
+                              <div className="text-center text-slate-400">日</div>
+                              <div className="text-center text-slate-400">月</div>
+                              <div className="text-center text-slate-400">火</div>
+                              <div className="text-center text-slate-400">水</div>
+                              <div className="text-center text-slate-400">木</div>
+                              <div className="text-center text-slate-400">金</div>
+                              <div className="text-center text-slate-400">土</div>
+                              {calendarCells.map((cell, idx) =>
+                                cell === null ? (
+                                  <div key={idx} />
+                                ) : (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    onClick={() => selectCalendarDate(cell)}
+                                  >
+                                    {cell}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                            <div className="flex justify-between mt-2">
+                              <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                              <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
+                    <div className="relative" data-date-field="sedationDate">
+                      <input
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)} bg-white`}
+                        placeholder="202X年XX月XX日"
+                        value={reportFields.sedationDate}
+                        readOnly
+                        onClick={() => openCalendar("sedationDate")}
+                        data-date-field
+                      />
+                      {openDateField === "sedationDate" && (
+                        <div className="absolute z-20 mt-1 left-0">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                            <div className="flex items-center justify-between mb-2">
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <span className="font-bold text-sm">
+                                {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
+                              </span>
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-xs mb-1">
+                              <div className="text-center text-slate-400">日</div>
+                              <div className="text-center text-slate-400">月</div>
+                              <div className="text-center text-slate-400">火</div>
+                              <div className="text-center text-slate-400">水</div>
+                              <div className="text-center text-slate-400">木</div>
+                              <div className="text-center text-slate-400">金</div>
+                              <div className="text-center text-slate-400">土</div>
+                              {calendarCells.map((cell, idx) =>
+                                cell === null ? (
+                                  <div key={idx} />
+                                ) : (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    onClick={() => selectCalendarDate(cell)}
+                                  >
+                                    {cell}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                            <div className="flex justify-between mt-2">
+                              <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                              <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
+                    <div className="relative" data-date-field="anesthesiaDate">
+                      <input
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)} bg-white`}
+                        placeholder="202X年XX月XX日"
+                        value={reportFields.anesthesiaDate}
+                        readOnly
+                        onClick={() => openCalendar("anesthesiaDate")}
+                        data-date-field
+                      />
+                      {openDateField === "anesthesiaDate" && (
+                        <div className="absolute z-20 mt-1 left-0">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                            <div className="flex items-center justify-between mb-2">
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <span className="font-bold text-sm">
+                                {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
+                              </span>
+                              <button type="button" className="btn btn-xs" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                            </div>
+                            <div className="grid grid-cols-7 gap-1 text-xs mb-1">
+                              <div className="text-center text-slate-400">日</div>
+                              <div className="text-center text-slate-400">月</div>
+                              <div className="text-center text-slate-400">火</div>
+                              <div className="text-center text-slate-400">水</div>
+                              <div className="text-center text-slate-400">木</div>
+                              <div className="text-center text-slate-400">金</div>
+                              <div className="text-center text-slate-400">土</div>
+                              {calendarCells.map((cell, idx) =>
+                                cell === null ? (
+                                  <div key={idx} />
+                                ) : (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    onClick={() => selectCalendarDate(cell)}
+                                  >
+                                    {cell}
+                                  </button>
+                                )
+                              )}
+                            </div>
+                            <div className="flex justify-between mt-2">
+                              <button type="button" className="btn btn-xs btn-outline" onClick={clearCalendarDate}>クリア</button>
+                              <button type="button" className="btn btn-xs btn-outline" onClick={closeCalendar}>閉じる</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">
                       紹介病院名
@@ -2393,99 +2482,6 @@ ${doctor} 先生
                 </div>
               </div>
 
-              <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">飼い主姓</label>
-                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.ownerLastName)} bg-white`}
-                      placeholder="山田"
-                      value={reportFields.ownerLastName}
-                      onChange={e => setReportFields(v => ({ ...v, ownerLastName: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">ペット名</label>
-                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.petName)} bg-white`}
-                      placeholder="タロウ"
-                      value={reportFields.petName}
-                      onChange={e => setReportFields(v => ({ ...v, petName: e.target.value }))}
-                      onKeyDown={e => {
-                        if (e.key === 'Tab' && !e.shiftKey) {
-                          shouldOpenAttendingVetOnFocusRef.current = true;
-                        }
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          shouldOpenAttendingVetOnFocusRef.current = true;
-                          requestAnimationFrame(() => focusAndScroll(document.getElementById('attending-vet-btn')));
-                        }
-                      }}
-                    />
-                  </div>
-                  {/* 担当獣医師（新規：プルダウン） */}
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">担当獣医師</label>
-                    <div className="relative" ref={attendingVetDropdownRef}>
-                      <button
-                        id="attending-vet-btn"
-                        type="button"
-                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.attendingVet)} bg-white`}
-                        aria-haspopup="listbox"
-                        aria-expanded={isAttendingVetDropdownOpen}
-                        onFocus={() => {
-                          if (!shouldOpenAttendingVetOnFocusRef.current) return;
-                          shouldOpenAttendingVetOnFocusRef.current = false;
-                          setIsAttendingVetDropdownOpen(true);
-                          setDropdownHighlight(0);
-                        }}
-                        onClick={() => { setIsAttendingVetDropdownOpen(v => !v); setDropdownHighlight(-1); }}
-                        onKeyDown={isAttendingVetDropdownOpen ? (e) => {
-                          const items = ['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
-                          handleDropdownKeyDown(e, items.length, (idx) => {
-                            const name = items[idx];
-                            setReportFields(v => ({ ...v, attendingVet: name }));
-                            setIsAttendingVetDropdownOpen(false);
-                            if (name) requestAnimationFrame(() => openCalendar('firstVisitDate'));
-                          }, () => setIsAttendingVetDropdownOpen(false));
-                        } : undefined}
-                      >
-                        <span className={reportFields.attendingVet ? 'text-slate-900' : 'text-slate-500'}>
-                          {reportFields.attendingVet || '選択してください'}
-                        </span>
-                      </button>
-
-                      {isAttendingVetDropdownOpen && (
-                        <ul
-                          role="listbox"
-                          className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
-                        >
-                          {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
-                            const label = name || '選択してください';
-                            const isSelected = reportFields.attendingVet === name;
-                            const isHighlighted = dropdownHighlight === idx;
-                            return (
-                              <li key={label}>
-                                <button
-                                  type="button"
-                                  className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
-                                  onClick={() => {
-                                    setReportFields(v => ({ ...v, attendingVet: name }));
-                                    setIsAttendingVetDropdownOpen(false);
-                                    if (name) {
-                                      requestAnimationFrame(() => openCalendar('firstVisitDate'));
-                                    }
-                                  }}
-                                >
-                                  {label}
-                                </button>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* 主訴（新規：テキスト入力） */}
               <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-slate-200 bg-transparent p-3 md:p-4 mt-1 md:mt-2">
@@ -2828,7 +2824,7 @@ ${doctor} 先生
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
               </svg>
-              画像を追加
+              画像追加
             </button>
           </div>
 
