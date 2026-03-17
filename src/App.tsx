@@ -354,6 +354,8 @@ const PageSwitcher: React.FC<PageSwitcherProps> = ({
 
 
 const App: React.FC = () => {
+    // 紹介病院名input用ref
+    const refHospitalInputRef = useRef<HTMLInputElement | null>(null);
   const [showPage3, setShowPage3] = useState(false);
 
   // ページ管理
@@ -381,6 +383,8 @@ const App: React.FC = () => {
   const attendingVetDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isAttendingVetDropdownOpen, setIsAttendingVetDropdownOpen] = useState(false);
   const page2PhotoCategoryDropdownRef = useRef<HTMLDivElement | null>(null);
+  // PAGE2「検査・処置内容」textarea用ref
+  const page2ProcedureTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [isPage2PhotoCategoryDropdownOpen, setIsPage2PhotoCategoryDropdownOpen] = useState(false);
   const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
@@ -1815,6 +1819,26 @@ ${doctor} 先生
     const formatted = formatCalendarDate(date);
     setReportFields(prev => ({ ...prev, [openDateField]: formatted }));
     setOpenDateField(null);
+
+    // 日付選択後の自動遷移
+    if (openDateField === 'reportDate') {
+      // 報告日→初診日カレンダー
+      setTimeout(() => openCalendar('firstVisitDate'), 0);
+    } else if (openDateField === 'firstVisitDate') {
+      // 初診日→鎮静日カレンダー
+      setTimeout(() => openCalendar('sedationDate'), 0);
+    } else if (openDateField === 'sedationDate') {
+      // 鎮静日→全身麻酔日カレンダー
+      setTimeout(() => openCalendar('anesthesiaDate'), 0);
+    } else if (openDateField === 'anesthesiaDate') {
+      // 全身麻酔日→紹介病院名inputへフォーカス
+      setTimeout(() => {
+        if (refHospitalInputRef.current) {
+          refHospitalInputRef.current.focus();
+          refHospitalInputRef.current.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+      }, 0);
+    }
   }, [calendarMonth, formatCalendarDate, openDateField]);
 
   const clearCalendarDate = useCallback(() => {
@@ -1843,7 +1867,7 @@ ${doctor} 先生
     requestAnimationFrame(() => focusAndScroll(document.getElementById(nextTargetId)));
   }, [normalizedRefHospitalEmails, focusAndScroll]);
 
-  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent, itemCount: number, onSelect: (index: number) => void, onClose: () => void) => {
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent, itemCount: number, onSelect: (index: number) => void, onClose: () => void, focusNext?: () => void) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setDropdownHighlight(prev => (prev + 1) % itemCount);
@@ -1854,6 +1878,9 @@ ${doctor} 先生
       e.preventDefault();
       if (dropdownHighlight >= 0 && dropdownHighlight < itemCount) {
         onSelect(dropdownHighlight);
+        if (focusNext) {
+          setTimeout(() => focusNext(), 0);
+        }
       }
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -2050,11 +2077,27 @@ ${doctor} 先生
       {openDateField === 'reportDate' && (
         <div className="absolute right-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
           <div className="flex items-center justify-between mb-2">
-            <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded transition-colors cursor-pointer text-gray-700 hover:text-orange-600"
+              onClick={() => moveCalendarMonth(-1)}
+            >
+              <span
+                style={{ fontSize: '22px', display: 'inline-block', lineHeight: '1' }}
+              >{'<'}</span>
+            </button>
             <span className="text-lg font-bold text-indigo-700">
               {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
             </span>
-            <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded transition-colors cursor-pointer text-gray-700 hover:text-orange-600"
+              onClick={() => moveCalendarMonth(1)}
+            >
+              <span
+                style={{ fontSize: '22px', display: 'inline-block', lineHeight: '1' }}
+              >{'>'}</span>
+            </button>
           </div>
           <div className="grid grid-cols-7 gap-1">
             {calendarCells.map((day, idx) => {
@@ -2209,11 +2252,15 @@ ${doctor} 先生
                         <div className="absolute z-20 mt-1 left-0">
                           <div className="bg-white border rounded shadow-lg p-2 w-64">
                             <div className="flex items-center justify-between mb-2">
-                              <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(-1)}>
+                                <span className="text-xl leading-none">{'<'}</span>
+                              </button>
                               <span className="text-lg font-bold text-indigo-700">
                                 {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
                               </span>
-                              <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                              <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(1)}>
+                                <span className="text-xl leading-none">{'>'}</span>
+                              </button>
                             </div>
                             <div className="grid grid-cols-7 gap-1 text-xs mb-1">
                               {calendarCells.map((cell, idx) =>
@@ -2255,11 +2302,15 @@ ${doctor} 先生
                         <div className="absolute z-20 mt-1 left-0">
                           <div className="bg-white border rounded shadow-lg p-2 w-64">
                             <div className="flex items-center justify-between mb-2">
-                              <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(-1)}>
+                                <span className="text-xl leading-none">{'<'}</span>
+                              </button>
                               <span className="text-lg font-bold text-indigo-700">
                                 {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
                               </span>
-                              <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                              <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(1)}>
+                                <span className="text-xl leading-none">{'>'}</span>
+                              </button>
                             </div>
                             <div className="grid grid-cols-7 gap-1 text-xs mb-1">
                               {calendarCells.map((cell, idx) =>
@@ -2301,11 +2352,15 @@ ${doctor} 先生
                         <div className="absolute z-20 mt-1 left-0">
                           <div className="bg-white border rounded shadow-lg p-2 w-64">
                             <div className="flex items-center justify-between mb-2">
-                              <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(-1)}>&lt;</button>
+                              <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(-1)}>
+                                <span className="text-xl leading-none">{'<'}</span>
+                              </button>
                               <span className="text-lg font-bold text-indigo-700">
                                 {calendarMonth.getFullYear()}年{calendarMonth.getMonth() + 1}月
                               </span>
-                              <button type="button" className="text-base font-bold text-gray-700 hover:text-orange-600 px-2 py-1 rounded transition-colors" onClick={() => moveCalendarMonth(1)}>&gt;</button>
+                              <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(1)}>
+                                <span className="text-xl leading-none">{'>'}</span>
+                              </button>
                             </div>
                             <div className="grid grid-cols-7 gap-1 text-xs mb-1">
                               {calendarCells.map((cell, idx) =>
@@ -2339,6 +2394,7 @@ ${doctor} 先生
 
                     <input
                       id="ref-hospital-input"
+                      ref={refHospitalInputRef}
                       className={`w-full max-w-[520px] h-11 px-3 py-2 rounded-xl border text-base ${getEmptyFieldToneClass(refHospitalInput)} bg-white`}
                       placeholder="例：中川動物病院"
                       value={refHospitalInput}
@@ -2567,10 +2623,16 @@ ${doctor} 先生
                     onClick={() => { setIsPage2PhotoCategoryDropdownOpen(v => !v); setDropdownHighlight(-1); }}
                     onKeyDown={isPage2PhotoCategoryDropdownOpen ? (e) => {
                       const items = [{ value: '' }, { value: 'treatment-after' }, { value: 'inspection' }];
-                      handleDropdownKeyDown(e, items.length, (idx) => {
-                        setReportFields(v => ({ ...v, page2PhotoCategory: items[idx].value }));
-                        setIsPage2PhotoCategoryDropdownOpen(false);
-                      }, () => setIsPage2PhotoCategoryDropdownOpen(false));
+                      handleDropdownKeyDown(
+                        e,
+                        items.length,
+                        (idx) => {
+                          setReportFields(v => ({ ...v, page2PhotoCategory: items[idx].value }));
+                          setIsPage2PhotoCategoryDropdownOpen(false);
+                        },
+                        () => setIsPage2PhotoCategoryDropdownOpen(false),
+                        () => page2ProcedureTextareaRef.current?.focus()
+                      );
                     } : undefined}
                   >
                     <span className={reportFields.page2PhotoCategory ? 'text-slate-900' : 'text-slate-500'}>
@@ -2615,7 +2677,9 @@ ${doctor} 先生
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
-                <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
+                <textarea
+                  ref={page2ProcedureTextareaRef}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   placeholder=""
                   value={reportFields.procedureText}
                   onChange={e => setReportFields(v => ({ ...v, procedureText: e.target.value }))}
