@@ -23,6 +23,10 @@ export interface ImageData {
 
   // 表示上のトリミング範囲
   crop?: ImageCrop;
+
+  // 回転・反転状態
+  flipX?: boolean;
+  flipY?: boolean;
 }
 
 export interface LayoutOptions {
