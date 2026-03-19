@@ -126,22 +126,72 @@ function normalizeImageCropByHandle(crop: ImageCrop, handle: CropHandle): ImageC
   return normalizeImageCrop(next);
 }
 
-function cropToPixels(crop: ImageCrop, viewport: Pick<CropViewportRect, 'width' | 'height'>): CropPixelRect {
+// 回転行列による座標変換
+function rotatePoint(x: number, y: number, cx: number, cy: number, deg: number): { x: number, y: number } {
+  const rad = (deg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = x - cx;
+  const dy = y - cy;
   return {
-    left: crop.left * viewport.width,
-    top: crop.top * viewport.height,
-    right: crop.right * viewport.width,
-    bottom: crop.bottom * viewport.height,
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
   };
 }
 
-function pixelsToCrop(pixelRect: CropPixelRect, viewport: Pick<CropViewportRect, 'width' | 'height'>): ImageCrop {
-  if (viewport.width <= 0 || viewport.height <= 0) return DEFAULT_IMAGE_CROP;
+function cropToPixels(
+  crop: ImageCrop,
+  viewport: Pick<CropViewportRect, 'width' | 'height'>,
+  rotation: number = 0
+): CropPixelRect {
+  // 画像の中心
+  const cx = viewport.width / 2;
+  const cy = viewport.height / 2;
+  // 非回転時の矩形
+  const left = crop.left * viewport.width;
+  const top = crop.top * viewport.height;
+  const right = crop.right * viewport.width;
+  const bottom = crop.bottom * viewport.height;
+  // 4隅を回転
+  const p1 = rotatePoint(left, top, cx, cy, rotation);
+  const p2 = rotatePoint(right, top, cx, cy, rotation);
+  const p3 = rotatePoint(left, bottom, cx, cy, rotation);
+  const p4 = rotatePoint(right, bottom, cx, cy, rotation);
+  // 回転後の外接矩形
+  const xs = [p1.x, p2.x, p3.x, p4.x];
+  const ys = [p1.y, p2.y, p3.y, p4.y];
+  return {
+    left: Math.min(...xs),
+    top: Math.min(...ys),
+    right: Math.max(...xs),
+    bottom: Math.max(...ys),
+  };
+}
+
+function pixelsToCrop(
+  pixelRect: CropPixelRect,
+  viewport: Pick<CropViewportRect, 'width' | 'height'>,
+  rotation: number = 0
+): ImageCrop {
+  // 画像の中心
+  const cx = viewport.width / 2;
+  const cy = viewport.height / 2;
+  // 逆回転で4隅を元に戻す
+  const p1 = rotatePoint(pixelRect.left, pixelRect.top, cx, cy, -rotation);
+  const p2 = rotatePoint(pixelRect.right, pixelRect.top, cx, cy, -rotation);
+  const p3 = rotatePoint(pixelRect.left, pixelRect.bottom, cx, cy, -rotation);
+  const p4 = rotatePoint(pixelRect.right, pixelRect.bottom, cx, cy, -rotation);
+  // 非回転時の外接矩形
+  const xs = [p1.x, p2.x, p3.x, p4.x];
+  const ys = [p1.y, p2.y, p3.y, p4.y];
+  const w = viewport.width;
+  const h = viewport.height;
+  if (w <= 0 || h <= 0) return DEFAULT_IMAGE_CROP;
   return normalizeImageCrop({
-    left: pixelRect.left / viewport.width,
-    top: pixelRect.top / viewport.height,
-    right: pixelRect.right / viewport.width,
-    bottom: pixelRect.bottom / viewport.height,
+    left: Math.min(...xs) / w,
+    top: Math.min(...ys) / h,
+    right: Math.max(...xs) / w,
+    bottom: Math.max(...ys) / h,
   });
 }
 
@@ -802,7 +852,23 @@ useEffect(() => {
         let newRotation = direction === 'right' ? img.rotation + 90 : img.rotation - 90;
         if (newRotation < 0) newRotation = 270;
         if (newRotation >= 360) newRotation = 0;
-        return { ...img, rotation: newRotation };
+        // cropも回転後の座標系に変換
+        let newCrop = (img as any).crop;
+        if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
+          // 1. 現在のcropをピクセル座標に変換（回転前）
+          const cropPx = cropToPixels(
+            normalizeImageCrop(newCrop),
+            activeCropViewportRect,
+            img.rotation
+          );
+          // 2. ピクセル座標を新しいrotationでcropに逆変換
+          newCrop = pixelsToCrop(
+            cropPx,
+            activeCropViewportRect,
+            newRotation
+          );
+        }
+        return { ...img, rotation: newRotation, crop: newCrop };
       }
       return img;
     }));
@@ -977,7 +1043,10 @@ useEffect(() => {
       const dyPx = event.clientY - dragState.startY;
 
       const base = dragState.startCrop;
-      const basePixels = cropToPixels(base, viewport);
+      // 画像のrotationを考慮
+      const img = images.find((img) => img.id === dragState.imageId);
+      const rotation = img?.rotation ?? 0;
+      const basePixels = cropToPixels(base, viewport, rotation);
 
       if (dragState.mode === 'move') {
         const width = basePixels.right - basePixels.left;
@@ -990,7 +1059,7 @@ useEffect(() => {
           right: nextLeft + width,
           bottom: nextTop + height,
         };
-        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport));
+        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport, rotation));
         return;
       }
 
@@ -1015,7 +1084,7 @@ useEffect(() => {
       }
 
       const normalizedPixels = normalizeCropPixelRectByHandle(nextPixels, dragState.handle, viewport);
-      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport), dragState.handle);
+      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport, rotation), dragState.handle);
       updateImageCrop(dragState.imageId, () => normalized);
     };
 
@@ -2917,7 +2986,7 @@ ${doctor} 先生
                             {(() => {
                               const crop = getImageCrop(img) ?? DEFAULT_IMAGE_CROP;
                               const cropPixels = activeCropViewportRect && activeCropImageId === img.id
-                                ? cropToPixels(crop, activeCropViewportRect)
+                                ? cropToPixels(crop, activeCropViewportRect, img.rotation)
                                 : null;
                               return (
                                 <div
@@ -2981,6 +3050,7 @@ ${doctor} 先生
                                 onClick={() => rotateImage(img.id, "left")}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
                                 style={{ maxWidth: '50%' }}
+                                disabled={activeCropImageId === img.id}
                               >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9" />
@@ -2990,13 +3060,57 @@ ${doctor} 先生
                                 onClick={() => rotateImage(img.id, 'right')}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
                                 style={{ maxWidth: '50%' }}
+                                disabled={activeCropImageId === img.id}
                               >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 4v5h-.582m-15.356 2A8.001 8.001 0 0119.418 9m0 0H15" />
                                 </svg>
                               </button>
                             </div>
-                            {/* 2段目: 削除ボタン */}
+                            {/* 2段目: 向きを確定・削除ボタン */}
+                            <button
+                              onClick={async () => {
+                                // 向きを確定: canvasで回転を焼き込み
+                                const image = new window.Image();
+                                image.src = img.dataUrl;
+                                await new Promise(resolve => { image.onload = resolve; });
+                                const canvas = document.createElement('canvas');
+                                // 回転後のサイズ計算
+                                let w = img.width;
+                                let h = img.height;
+                                let deg = img.rotation;
+                                if (deg === 90 || deg === 270) {
+                                  w = img.height;
+                                  h = img.width;
+                                }
+                                canvas.width = w;
+                                canvas.height = h;
+                                const ctx = canvas.getContext('2d');
+                                if (!ctx) return;
+                                ctx.save();
+                                // 回転中心をcanvas中央に
+                                ctx.translate(w / 2, h / 2);
+                                ctx.rotate((deg * Math.PI) / 180);
+                                // 回転後の描画位置
+                                if (deg === 90 || deg === 270) {
+                                  ctx.drawImage(image, -h / 2, -w / 2, h, w);
+                                } else {
+                                  ctx.drawImage(image, -w / 2, -h / 2, w, h);
+                                }
+                                ctx.restore();
+                                const newDataUrl = canvas.toDataURL();
+                                setImages((prev: ImageData[]) => prev.map(i =>
+                                  i.id === img.id
+                                    ? { ...i, dataUrl: newDataUrl, width: w, height: h, rotation: 0, crop: DEFAULT_IMAGE_CROP }
+                                    : i
+                                ));
+                              }}
+                              className="w-full h-12 rounded-lg bg-indigo-200 text-indigo-900 hover:bg-indigo-300 border border-indigo-300 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                              disabled={img.rotation === 0 || activeCropImageId === img.id}
+                              title="向きを確定"
+                            >
+                              向きを確定
+                            </button>
                             <button
                               onClick={() => removeImage(img.id)}
                               className="w-full h-12 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
@@ -3014,6 +3128,7 @@ ${doctor} 先生
                                     ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                                     : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                                 }`}
+                                disabled={img.rotation !== 0}
                               >
                                 {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
                               </button>
