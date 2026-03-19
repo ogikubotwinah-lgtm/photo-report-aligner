@@ -1113,7 +1113,9 @@ useEffect(() => {
       // 画像のrotationを考慮
       const img = images.find((img) => img.id === dragState.imageId);
       const rotation = img?.rotation ?? 0;
-      const basePixels = cropToPixels(base, viewport, rotation);
+      const flipX = img?.flipX ?? false;
+      const flipY = img?.flipY ?? false;
+      const basePixels = cropToPixels(base, viewport, rotation, flipX, flipY);
 
       if (dragState.mode === 'move') {
         const width = basePixels.right - basePixels.left;
@@ -1126,7 +1128,7 @@ useEffect(() => {
           right: nextLeft + width,
           bottom: nextTop + height,
         };
-        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport, rotation));
+        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport, rotation, flipX, flipY));
         return;
       }
 
@@ -1151,7 +1153,7 @@ useEffect(() => {
       }
 
       const normalizedPixels = normalizeCropPixelRectByHandle(nextPixels, dragState.handle, viewport);
-      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport, rotation), dragState.handle);
+      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport, rotation, flipX, flipY), dragState.handle);
       updateImageCrop(dragState.imageId, () => normalized);
     };
 
@@ -3051,7 +3053,7 @@ ${doctor} 先生
                             {(() => {
                               const crop = getImageCrop(img) ?? DEFAULT_IMAGE_CROP;
                               const cropPixels = activeCropViewportRect && activeCropImageId === img.id
-                                ? cropToPixels(crop, activeCropViewportRect, img.rotation)
+                                ? cropToPixels(crop, activeCropViewportRect, img.rotation, img.flipX, img.flipY)
                                 : null;
                               return (
                                 <div
@@ -3189,7 +3191,7 @@ ${doctor} 先生
                                         rotation: 0,
                                         flipX: false,
                                         flipY: false,
-                                        crop: DEFAULT_IMAGE_CROP
+                                        crop: i.crop // cropは維持
                                       }
                                     : i
                                 ));
@@ -3221,7 +3223,7 @@ ${doctor} 先生
                                       : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                                   }`}
                                   disabled={
-                                    (img.rotation ?? 0) !== 0
+                                    (img.rotation ?? 0) !== 0 || img.flipX || img.flipY
                                   }
                                 >
                                   {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
