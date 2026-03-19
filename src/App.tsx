@@ -3050,15 +3050,14 @@ ${doctor} 先生
                       </div>
 
                       <div className="w-[220px] flex-shrink-0">
-                        <div className="grid grid-cols-2 gap-2">
-                          {/* 左列：操作系 */}
-                          <div className="flex flex-col gap-2 w-full">
-                            {/* 1行目: 回転ボタン2つ横並び */}
+                        {/* 3列グリッドラッパー */}
+                        <div className="grid grid-cols-3 gap-2 items-start w-full">
+                          {/* 左列 */}
+                          <div className="flex flex-col gap-2">
                             <div className="flex gap-2 w-full">
                               <button
                                 onClick={() => rotateImage(img.id, "left")}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                                style={{ maxWidth: '50%' }}
                                 disabled={activeCropImageId === img.id}
                               >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3068,7 +3067,6 @@ ${doctor} 先生
                               <button
                                 onClick={() => rotateImage(img.id, 'right')}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                                style={{ maxWidth: '50%' }}
                                 disabled={activeCropImageId === img.id}
                               >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3076,12 +3074,10 @@ ${doctor} 先生
                                 </svg>
                               </button>
                             </div>
-                            {/* 2行目: 反転ボタン2つ横並び */}
                             <div className="flex gap-2 w-full">
                               <button
                                 onClick={() => flipImageX(img.id)}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                                style={{ maxWidth: '50%' }}
                                 disabled={activeCropImageId === img.id}
                               >
                                 {/* 左右反転アイコン */}
@@ -3092,7 +3088,6 @@ ${doctor} 先生
                               <button
                                 onClick={() => flipImageY(img.id)}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                                style={{ maxWidth: '50%' }}
                                 disabled={activeCropImageId === img.id}
                               >
                                 {/* 上下反転アイコン */}
@@ -3101,15 +3096,13 @@ ${doctor} 先生
                                 </svg>
                               </button>
                             </div>
-                            {/* 3行目: 向きを確定 */}
                             <button
                               onClick={async () => {
-                                // 向きを確定: canvasで回転を焼き込み
+                                // ...existing code...
                                 const image = new window.Image();
                                 image.src = img.dataUrl;
                                 await new Promise(resolve => { image.onload = resolve; });
                                 const canvas = document.createElement('canvas');
-                                // 回転・反転後のサイズ計算
                                 let w = img.width;
                                 let h = img.height;
                                 let deg = img.rotation;
@@ -3122,7 +3115,6 @@ ${doctor} 先生
                                 const ctx = canvas.getContext('2d');
                                 if (!ctx) return;
                                 ctx.save();
-                                // 回転・反転をcanvas中央基準で反映
                                 ctx.translate(w / 2, h / 2);
                                 ctx.rotate((deg * Math.PI) / 180);
                                 ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
@@ -3141,8 +3133,9 @@ ${doctor} 先生
                             >
                               向きを確定
                             </button>
-                          {/* 中央列 wrapper: 削除ボタンのみ移動 */}
-                          <div className="flex flex-col gap-2 items-center justify-start">
+                          </div>
+                          {/* 中央列 */}
+                          <div className="flex flex-col gap-2">
                             <button
                               onClick={() => removeImage(img.id)}
                               className="w-full h-12 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
@@ -3151,55 +3144,43 @@ ${doctor} 先生
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
                             </button>
-                          </div>
-                            {/* 3段目: トリミングボタンとリセット固定枠 */}
-                            <div className="flex flex-col gap-1 w-full">
-                              {(() => {
-                                const hasPendingOrientation = (img.rotation ?? 0) !== 0 || !!img.flipX || !!img.flipY;
-                                return (
+                            {(() => {
+                              const hasPendingOrientation = (img.rotation ?? 0) !== 0 || !!img.flipX || !!img.flipY;
+                              return (
+                                <button
+                                  onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
+                                  className={`h-10 w-full rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
+                                    activeCropImageId === img.id
+                                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                                  }`}
+                                  disabled={hasPendingOrientation}
+                                >
+                                  {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
+                                </button>
+                              );
+                            })()}
+                            <div style={{ minHeight: 44 }} className="w-full flex items-center justify-center">
+                              {activeCropImageId === img.id ? (
+                                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5 w-full">
                                   <button
-                                    onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
-                                    className={`h-10 w-full rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
-                                      activeCropImageId === img.id
-                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                    }`}
-                                    disabled={hasPendingOrientation}
+                                    onClick={() => {
+                                      recordHistory();
+                                      resetImageCrop(img.id);
+                                    }}
+                                    className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
+                                    title="リセット"
                                   >
-                                    {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
+                                    リセット
                                   </button>
-                                );
-                              })()}
-                              {/* リセット表示用固定枠: min-hで高さ維持 */}
-                              <div style={{ minHeight: 44 }} className="w-full flex items-center justify-center">
-                                {activeCropImageId === img.id ? (
-                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5 w-full">
-                                    <button
-                                      onClick={() => {
-                                        recordHistory();
-                                        resetImageCrop(img.id);
-                                      }}
-                                      className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
-                                      title="リセット"
-                                    >
-                                      リセット
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="invisible w-full" style={{ height: 44 }} />
-                                )}
-                              </div>
+                                </div>
+                              ) : (
+                                <div className="invisible w-full" style={{ height: 44 }} />
+                              )}
                             </div>
                           </div>
                           {/* 右列：数字ボタン */}
-                          <div
-                            className="flex flex-col justify-between items-stretch"
-                            style={{
-                              minHeight: 'calc(100% - 4px)', // 画像外枠の高さに近づける
-                              gap: '10px', // ボタン間隔をやや狭く
-                              height: '100%'
-                            }}
-                          >
+                          <div className="flex flex-col justify-between items-stretch" style={{ minHeight: 'calc(100% - 4px)', gap: '10px', height: '100%' }}>
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
@@ -3241,11 +3222,7 @@ ${doctor} 先生
                                     ? 'bg-orange-500 text-white border-orange-400 shadow font-bold'
                                     : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
                                   }`}
-                                style={{
-                                  height: '44px', // ボタン高さをやや小さく
-                                  minHeight: '40px',
-                                  padding: '0',
-                                }}
+                                style={{ height: '44px', minHeight: '40px', padding: '0' }}
                               >
                                 {num}
                               </button>
