@@ -827,6 +827,8 @@ useEffect(() => {
                 row: 0,
                 orderConfirmed: false,
                 rotation: 0,
+                flipX: false,
+                flipY: false,
                 originalDataUrl: dataUrl,
                 originalWidth: img.width,
                 originalHeight: img.height
@@ -852,26 +854,35 @@ useEffect(() => {
         let newRotation = direction === 'right' ? img.rotation + 90 : img.rotation - 90;
         if (newRotation < 0) newRotation = 270;
         if (newRotation >= 360) newRotation = 0;
-        // cropも回転後の座標系に変換
         let newCrop = (img as any).crop;
         if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
-          // 1. 現在のcropをピクセル座標に変換（回転前）
           const cropPx = cropToPixels(
             normalizeImageCrop(newCrop),
             activeCropViewportRect,
             img.rotation
           );
-          // 2. ピクセル座標を新しいrotationでcropに逆変換
           newCrop = pixelsToCrop(
             cropPx,
             activeCropViewportRect,
             newRotation
           );
         }
-        return { ...img, rotation: newRotation, crop: newCrop };
+        return { ...img, rotation: newRotation, crop: newCrop, flipX: img.flipX, flipY: img.flipY };
       }
       return img;
     }));
+  };
+
+  const flipImageX = (id: string) => {
+    setImages((prev: ImageData[]) => prev.map(img =>
+      img.id === id ? { ...img, flipX: !img.flipX } : img
+    ));
+  };
+
+  const flipImageY = (id: string) => {
+    setImages((prev: ImageData[]) => prev.map(img =>
+      img.id === id ? { ...img, flipY: !img.flipY } : img
+    ));
   };
 
   const updateImageRow = (id: string, newRow: number) => {
@@ -1106,12 +1117,13 @@ useEffect(() => {
     const crop = getImageCrop(img);
     const isActiveCropTarget = activeCropImageId === img.id && !!activeCropViewportRect;
 
+    const flipX = img.flipX ? -1 : 1;
+    const flipY = img.flipY ? -1 : 1;
     if (isActiveCropTarget) {
       const insetTop = (crop ?? DEFAULT_IMAGE_CROP).top * 100;
       const insetRight = (1 - (crop ?? DEFAULT_IMAGE_CROP).right) * 100;
       const insetBottom = (1 - (crop ?? DEFAULT_IMAGE_CROP).bottom) * 100;
       const insetLeft = (crop ?? DEFAULT_IMAGE_CROP).left * 100;
-
       return {
         position: 'absolute',
         left: `${activeCropViewportRect!.left}px`,
@@ -1120,33 +1132,30 @@ useEffect(() => {
         height: `${activeCropViewportRect!.height}px`,
         objectFit: 'contain',
         clipPath: `inset(${insetTop}% ${insetRight}% ${insetBottom}% ${insetLeft}%)`,
-        transform: `rotate(${img.rotation}deg)`,
+        transform: `rotate(${img.rotation}deg) scaleX(${flipX}) scaleY(${flipY})`,
         transformOrigin: 'center center',
         display: 'block',
       };
     }
-
     if (!crop) {
       return {
         width: '100%',
         height: '100%',
         objectFit: 'contain',
-        transform: `rotate(${img.rotation}deg)`,
+        transform: `rotate(${img.rotation}deg) scaleX(${flipX}) scaleY(${flipY})`,
         display: 'block',
       };
     }
-
     const insetTop = crop.top * 100;
     const insetRight = (1 - crop.right) * 100;
     const insetBottom = (1 - crop.bottom) * 100;
     const insetLeft = crop.left * 100;
-
     return {
       width: '100%',
       height: '100%',
       objectFit: 'contain',
       clipPath: `inset(${insetTop}% ${insetRight}% ${insetBottom}% ${insetLeft}%)`,
-      transform: `rotate(${img.rotation}deg)`,
+      transform: `rotate(${img.rotation}deg) scaleX(${flipX}) scaleY(${flipY})`,
       transformOrigin: 'center center',
       display: 'block',
     };
@@ -3044,7 +3053,7 @@ ${doctor} 先生
                         <div className="grid grid-cols-2 gap-2">
                           {/* 左列：操作系 */}
                           <div className="flex flex-col gap-2 w-full">
-                            {/* 1段目: 回転ボタン2つ横並び */}
+                            {/* 1行目: 回転ボタン2つ横並び */}
                             <div className="flex gap-2 w-full">
                               <button
                                 onClick={() => rotateImage(img.id, "left")}
@@ -3067,7 +3076,32 @@ ${doctor} 先生
                                 </svg>
                               </button>
                             </div>
-                            {/* 2段目: 向きを確定・削除ボタン */}
+                            {/* 2行目: 反転ボタン2つ横並び */}
+                            <div className="flex gap-2 w-full">
+                              <button
+                                onClick={() => flipImageX(img.id)}
+                                className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                                style={{ maxWidth: '50%' }}
+                                disabled={activeCropImageId === img.id}
+                              >
+                                {/* 左右反転アイコン */}
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 12h16M10 16l-4-4 4-4" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => flipImageY(img.id)}
+                                className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                                style={{ maxWidth: '50%' }}
+                                disabled={activeCropImageId === img.id}
+                              >
+                                {/* 上下反転アイコン */}
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16M16 10l-4-4-4 4" />
+                                </svg>
+                              </button>
+                            </div>
+                            {/* 3行目: 向きを確定 */}
                             <button
                               onClick={async () => {
                                 // 向きを確定: canvasで回転を焼き込み
@@ -3075,7 +3109,7 @@ ${doctor} 先生
                                 image.src = img.dataUrl;
                                 await new Promise(resolve => { image.onload = resolve; });
                                 const canvas = document.createElement('canvas');
-                                // 回転後のサイズ計算
+                                // 回転・反転後のサイズ計算
                                 let w = img.width;
                                 let h = img.height;
                                 let deg = img.rotation;
@@ -3088,20 +3122,16 @@ ${doctor} 先生
                                 const ctx = canvas.getContext('2d');
                                 if (!ctx) return;
                                 ctx.save();
-                                // 回転中心をcanvas中央に
+                                // 回転・反転をcanvas中央基準で反映
                                 ctx.translate(w / 2, h / 2);
                                 ctx.rotate((deg * Math.PI) / 180);
-                                // 回転後の描画位置
-                                if (deg === 90 || deg === 270) {
-                                  ctx.drawImage(image, -h / 2, -w / 2, h, w);
-                                } else {
-                                  ctx.drawImage(image, -w / 2, -h / 2, w, h);
-                                }
+                                ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
+                                ctx.drawImage(image, -img.width / 2, -img.height / 2, img.width, img.height);
                                 ctx.restore();
                                 const newDataUrl = canvas.toDataURL();
                                 setImages((prev: ImageData[]) => prev.map(i =>
                                   i.id === img.id
-                                    ? { ...i, dataUrl: newDataUrl, width: w, height: h, rotation: 0, crop: DEFAULT_IMAGE_CROP }
+                                    ? { ...i, dataUrl: newDataUrl, width: w, height: h, rotation: 0, flipX: false, flipY: false, crop: DEFAULT_IMAGE_CROP }
                                     : i
                                 ));
                               }}
@@ -3111,6 +3141,8 @@ ${doctor} 先生
                             >
                               向きを確定
                             </button>
+                          {/* 中央列 wrapper: 削除ボタンのみ移動 */}
+                          <div className="flex flex-col gap-2 items-center justify-start">
                             <button
                               onClick={() => removeImage(img.id)}
                               className="w-full h-12 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
@@ -3119,37 +3151,55 @@ ${doctor} 先生
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
                             </button>
-                            {/* 3段目: トリミングボタンとリセット */}
+                          </div>
+                            {/* 3段目: トリミングボタンとリセット固定枠 */}
                             <div className="flex flex-col gap-1 w-full">
-                              <button
-                                onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
-                                className={`h-10 w-full rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
-                                  activeCropImageId === img.id
-                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                }`}
-                                disabled={img.rotation !== 0}
-                              >
-                                {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
-                              </button>
-                              {activeCropImageId === img.id && (
-                                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
+                              {(() => {
+                                const hasPendingOrientation = (img.rotation ?? 0) !== 0 || !!img.flipX || !!img.flipY;
+                                return (
                                   <button
-                                    onClick={() => {
-                                      recordHistory();
-                                      resetImageCrop(img.id);
-                                    }}
-                                    className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
-                                    title="リセット"
+                                    onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
+                                    className={`h-10 w-full rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
+                                      activeCropImageId === img.id
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                                    }`}
+                                    disabled={hasPendingOrientation}
                                   >
-                                    リセット
+                                    {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
                                   </button>
-                                </div>
-                              )}
+                                );
+                              })()}
+                              {/* リセット表示用固定枠: min-hで高さ維持 */}
+                              <div style={{ minHeight: 44 }} className="w-full flex items-center justify-center">
+                                {activeCropImageId === img.id ? (
+                                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5 w-full">
+                                    <button
+                                      onClick={() => {
+                                        recordHistory();
+                                        resetImageCrop(img.id);
+                                      }}
+                                      className="h-8 w-full rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100"
+                                      title="リセット"
+                                    >
+                                      リセット
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="invisible w-full" style={{ height: 44 }} />
+                                )}
+                              </div>
                             </div>
                           </div>
                           {/* 右列：数字ボタン */}
-                          <div className="flex flex-col gap-1.5 justify-between min-h-[180px] items-stretch">
+                          <div
+                            className="flex flex-col justify-between items-stretch"
+                            style={{
+                              minHeight: 'calc(100% - 4px)', // 画像外枠の高さに近づける
+                              gap: '10px', // ボタン間隔をやや狭く
+                              height: '100%'
+                            }}
+                          >
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
@@ -3187,10 +3237,15 @@ ${doctor} 先生
                                     if (currentPage === 3) setPage3Confirmed(true);
                                   }
                                 }}
-                                className={`h-12 rounded-lg text-lg font-semibold transition-all shadow-sm active:scale-95 border ${img.row === num
+                                className={`rounded-lg text-lg font-semibold transition-all shadow-sm active:scale-95 border ${img.row === num
                                     ? 'bg-orange-500 text-white border-orange-400 shadow font-bold'
                                     : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
                                   }`}
+                                style={{
+                                  height: '44px', // ボタン高さをやや小さく
+                                  minHeight: '40px',
+                                  padding: '0',
+                                }}
                               >
                                 {num}
                               </button>
