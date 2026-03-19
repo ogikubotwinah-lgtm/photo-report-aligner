@@ -70,21 +70,10 @@ function ItemContent({ img, setImages, setActiveCropImageId, onUnassignImage }: 
             style={{
               maxWidth: "100%",
               maxHeight: "100%",
-              transform: `rotate(${img.rotation ?? 0}deg)`,
+              transform: `rotate(${img.rotation ?? 0}deg) scaleX(${img.flipX ? -1 : 1}) scaleY(${img.flipY ? -1 : 1})`,
               pointerEvents: "none",
             }}
           />
-        </div>
-        <div
-          style={{
-            fontSize: 12,
-            marginTop: 6,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {/* ファイル名表示を削除（img.name） */}
         </div>
         <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
           <button
@@ -361,7 +350,7 @@ export default function RowBoard({ images, setImages, rows = 4, setActiveCropIma
     activeItemRowRef.current = null;
   }, []);
 
-  return (
+    return (
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
@@ -372,11 +361,26 @@ export default function RowBoard({ images, setImages, rows = 4, setActiveCropIma
     >
       <div style={{ display: "grid", gap: 12 }}>
         {Array.from({ length: rows }, (_, i) => i + 1).map((row) => (
-          <RowContainer key={row} row={row} images={byRow.get(row) ?? []} setImages={setImages} setActiveCropImageId={setActiveCropImageId} onUnassignImage={onUnassignImage} />
+          <RowContainer
+            key={row}
+            row={row}
+            images={byRow.get(row) ?? []}
+            setImages={setImages}
+            setActiveCropImageId={setActiveCropImageId}
+            onUnassignImage={onUnassignImage}
+          />
         ))}
       </div>
+
       <DragOverlay dropAnimation={null}>
-        {activeImage ? <ItemContent img={activeImage} setImages={setImages} setActiveCropImageId={setActiveCropImageId} /> : null}
+        {activeImage ? (
+          <ItemContent
+            img={activeImage}
+            setImages={setImages}
+            setActiveCropImageId={setActiveCropImageId}
+            onUnassignImage={onUnassignImage}
+          />
+        ) : null}
       </DragOverlay>
     </DndContext>
   );

@@ -142,16 +142,31 @@ function rotatePoint(x: number, y: number, cx: number, cy: number, deg: number):
 function cropToPixels(
   crop: ImageCrop,
   viewport: Pick<CropViewportRect, 'width' | 'height'>,
-  rotation: number = 0
+  rotation: number = 0,
+  flipX: boolean = false,
+  flipY: boolean = false
 ): CropPixelRect {
   // 画像の中心
   const cx = viewport.width / 2;
   const cy = viewport.height / 2;
   // 非回転時の矩形
-  const left = crop.left * viewport.width;
-  const top = crop.top * viewport.height;
-  const right = crop.right * viewport.width;
-  const bottom = crop.bottom * viewport.height;
+  let left = crop.left * viewport.width;
+  let top = crop.top * viewport.height;
+  let right = crop.right * viewport.width;
+  let bottom = crop.bottom * viewport.height;
+  // flipX/flipYを反映
+  if (flipX) {
+    const l = left;
+    const r = right;
+    left = viewport.width - r;
+    right = viewport.width - l;
+  }
+  if (flipY) {
+    const t = top;
+    const b = bottom;
+    top = viewport.height - b;
+    bottom = viewport.height - t;
+  }
   // 4隅を回転
   const p1 = rotatePoint(left, top, cx, cy, rotation);
   const p2 = rotatePoint(right, top, cx, cy, rotation);
@@ -171,7 +186,9 @@ function cropToPixels(
 function pixelsToCrop(
   pixelRect: CropPixelRect,
   viewport: Pick<CropViewportRect, 'width' | 'height'>,
-  rotation: number = 0
+  rotation: number = 0,
+  flipX: boolean = false,
+  flipY: boolean = false
 ): ImageCrop {
   // 画像の中心
   const cx = viewport.width / 2;
@@ -182,11 +199,18 @@ function pixelsToCrop(
   const p3 = rotatePoint(pixelRect.left, pixelRect.bottom, cx, cy, -rotation);
   const p4 = rotatePoint(pixelRect.right, pixelRect.bottom, cx, cy, -rotation);
   // 非回転時の外接矩形
-  const xs = [p1.x, p2.x, p3.x, p4.x];
-  const ys = [p1.y, p2.y, p3.y, p4.y];
+  let xs = [p1.x, p2.x, p3.x, p4.x];
+  let ys = [p1.y, p2.y, p3.y, p4.y];
   const w = viewport.width;
   const h = viewport.height;
   if (w <= 0 || h <= 0) return DEFAULT_IMAGE_CROP;
+  // flipX/flipYを逆変換
+  if (flipX) {
+    xs = xs.map(x => w - x);
+  }
+  if (flipY) {
+    ys = ys.map(y => h - y);
+  }
   return normalizeImageCrop({
     left: Math.min(...xs) / w,
     top: Math.min(...ys) / h,
@@ -859,12 +883,16 @@ useEffect(() => {
           const cropPx = cropToPixels(
             normalizeImageCrop(newCrop),
             activeCropViewportRect,
-            img.rotation
+            img.rotation,
+            img.flipX,
+            img.flipY
           );
           newCrop = pixelsToCrop(
             cropPx,
             activeCropViewportRect,
-            newRotation
+            newRotation,
+            img.flipX,
+            img.flipY
           );
         }
         return { ...img, rotation: newRotation, crop: newCrop, flipX: img.flipX, flipY: img.flipY };
@@ -874,15 +902,53 @@ useEffect(() => {
   };
 
   const flipImageX = (id: string) => {
-    setImages((prev: ImageData[]) => prev.map(img =>
-      img.id === id ? { ...img, flipX: !img.flipX } : img
-    ));
+    setImages((prev: ImageData[]) => prev.map(img => {
+      if (img.id !== id) return img;
+      let newCrop = (img as any).crop;
+      if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
+        const cropPx = cropToPixels(
+          normalizeImageCrop(newCrop),
+          activeCropViewportRect,
+          img.rotation,
+          img.flipX,
+          img.flipY
+        );
+        // X反転: flipXをトグルして新しい座標系に変換
+        newCrop = pixelsToCrop(
+          cropPx,
+          activeCropViewportRect,
+          img.rotation,
+          !img.flipX,
+          img.flipY
+        );
+      }
+      return { ...img, flipX: !img.flipX, crop: newCrop };
+    }));
   };
 
   const flipImageY = (id: string) => {
-    setImages((prev: ImageData[]) => prev.map(img =>
-      img.id === id ? { ...img, flipY: !img.flipY } : img
-    ));
+    setImages((prev: ImageData[]) => prev.map(img => {
+      if (img.id !== id) return img;
+      let newCrop = (img as any).crop;
+      if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
+        const cropPx = cropToPixels(
+          normalizeImageCrop(newCrop),
+          activeCropViewportRect,
+          img.rotation,
+          img.flipX,
+          img.flipY
+        );
+        // Y反転: flipYをトグルして新しい座標系に変換
+        newCrop = pixelsToCrop(
+          cropPx,
+          activeCropViewportRect,
+          img.rotation,
+          img.flipX,
+          !img.flipY
+        );
+      }
+      return { ...img, flipY: !img.flipY, crop: newCrop };
+    }));
   };
 
   const updateImageRow = (id: string, newRow: number) => {
@@ -920,16 +986,6 @@ useEffect(() => {
     setImages((prev: ImageData[]) => {
       return prev.map((img) => {
         if (img.id !== id) return img;
-        if (img.originalDataUrl) {
-          return {
-            ...img,
-            dataUrl: img.originalDataUrl ?? img.dataUrl,
-            width: img.originalWidth ?? img.width,
-            height: img.originalHeight ?? img.height,
-            crop: undefined
-            // original系は絶対に触らない
-          };
-        }
         return { ...img, crop: undefined } as ImageData;
       });
     });
@@ -3117,13 +3173,24 @@ ${doctor} 先生
                                 ctx.save();
                                 ctx.translate(w / 2, h / 2);
                                 ctx.rotate((deg * Math.PI) / 180);
+                                // 反転も必ず焼き込む
                                 ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
                                 ctx.drawImage(image, -img.width / 2, -img.height / 2, img.width, img.height);
                                 ctx.restore();
                                 const newDataUrl = canvas.toDataURL();
                                 setImages((prev: ImageData[]) => prev.map(i =>
                                   i.id === img.id
-                                    ? { ...i, dataUrl: newDataUrl, width: w, height: h, rotation: 0, flipX: false, flipY: false, crop: DEFAULT_IMAGE_CROP }
+                                    ? {
+                                        ...i,
+                                        dataUrl: newDataUrl,
+                                        originalDataUrl: newDataUrl, // 段落確定時も反転見た目を保持
+                                        width: w,
+                                        height: h,
+                                        rotation: 0,
+                                        flipX: false,
+                                        flipY: false,
+                                        crop: DEFAULT_IMAGE_CROP
+                                      }
                                     : i
                                 ));
                               }}
@@ -3145,7 +3212,6 @@ ${doctor} 先生
                               </svg>
                             </button>
                             {(() => {
-                              const hasPendingOrientation = (img.rotation ?? 0) !== 0 || !!img.flipX || !!img.flipY;
                               return (
                                 <button
                                   onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
@@ -3154,7 +3220,9 @@ ${doctor} 先生
                                       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                                       : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                                   }`}
-                                  disabled={hasPendingOrientation}
+                                  disabled={
+                                    (img.rotation ?? 0) !== 0
+                                  }
                                 >
                                   {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
                                 </button>
@@ -3188,6 +3256,7 @@ ${doctor} 先生
                                   // crop情報があればcanvasで切り抜き
                                   const crop = getImageCrop(img);
                                   if (crop) {
+                                    // 最新のimg情報を必ず参照
                                     const imageEl = new window.Image();
                                     imageEl.src = img.dataUrl;
                                     await new Promise((res, rej) => { imageEl.onload = res; imageEl.onerror = rej; });
@@ -3200,7 +3269,22 @@ ${doctor} 先生
                                     canvas.height = sh;
                                     const ctx = canvas.getContext('2d');
                                     if (ctx) {
-                                      ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, sw, sh);
+                                      ctx.save();
+                                      ctx.translate(canvas.width / 2, canvas.height / 2);
+                                      ctx.rotate(((img.rotation ?? 0) * Math.PI) / 180);
+                                      ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
+                                      ctx.drawImage(
+                                        imageEl,
+                                        sx,
+                                        sy,
+                                        sw,
+                                        sh,
+                                        -sw / 2,
+                                        -sh / 2,
+                                        sw,
+                                        sh
+                                      );
+                                      ctx.restore();
                                       const croppedDataUrl = canvas.toDataURL();
                                       setImages((prev: ImageData[]) => prev.map(i =>
                                         i.id === img.id ? { ...i, dataUrl: croppedDataUrl, crop: undefined } : i
