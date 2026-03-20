@@ -22,12 +22,14 @@ type AppSuggestions = {
 type PreviewYOffsetKey =
   | 'page1InitialHeader'
   | 'page1InitialBody'
+  | 'page2FreeText'
   | 'page2ProcedureTitle'
   | 'page2ProcedureBody'
   | 'page2PostTitle'
   | 'page2PostBody'
   | 'page2ThanksBody'
   | 'page2PhotoCategoryTitle'
+  | 'page3FreeTextArea'
   | 'page3FreeText'
   | 'page3PostopTitle'
   | 'page3PostopBody'
@@ -265,6 +267,7 @@ const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
   {
     section: 'PAGE2',
     items: [
+      { key: 'page2FreeText', label: '【自由記載欄】（PAGE2）' },
       { key: 'page2PhotoCategoryTitle', label: 'PAGE2 写真区分ラベル タイトル' },
       { key: 'page2ProcedureTitle', label: '【検査・処置内容】タイトル' },
       { key: 'page2ProcedureBody', label: '【検査・処置内容】本文' },
@@ -287,12 +290,14 @@ const PREVIEW_Y_OFFSET_UI_GROUPS: Array<{
 const PREVIEW_Y_OFFSET_INITIAL: PreviewYOffsetMap = {
   page1InitialHeader: 0,
   page1InitialBody: 0,
+  page2FreeText: 0,
   page2ProcedureTitle: 0,
   page2ProcedureBody: 0,
   page2PostTitle: 0,
   page2PostBody: 0,
   page2ThanksBody: 0,
   page2PhotoCategoryTitle: 0,
+  page3FreeTextArea: 0,
   page3FreeText: 0,
   page3PostopTitle: 0,
   page3PostopBody: 0,
@@ -1450,6 +1455,7 @@ useEffect(() => {
       indentPostOnPage3: true,
       page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
       page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
+      previewYOffsets: (renderOpts?.applyPreviewOffsets && pageNum === 3) ? previewYOffsets : undefined,
     });
 
     const offsetTextY = (part: string, deltaPx: number): string => {
@@ -1548,36 +1554,7 @@ useEffect(() => {
         });
       }
 
-      if (pageNum === 3) {
-        // PAGE3: 各要素ごとに個別のYオフセットを適用
-        let freeTextApplied = false;
-        let postopTitleApplied = false;
-        let postopBodyApplied = false;
-        let thanksBodyApplied = false;
-        textParts = textParts.map((part) => {
-          // 【自由記載欄】
-          if (!freeTextApplied && part.includes('<text') && part.includes('<tspan') && !part.includes('【')) {
-            freeTextApplied = true;
-            return previewYOffsets.page3FreeText ? offsetTextY(part, previewYOffsets.page3FreeText * pxPerCm) : part;
-          }
-          // 【術後経過】タイトル
-          if (!postopTitleApplied && part.includes('【術後経過】')) {
-            postopTitleApplied = true;
-            return previewYOffsets.page3PostopTitle ? offsetTextY(part, previewYOffsets.page3PostopTitle * pxPerCm) : part;
-          }
-          // 【術後経過】本文
-          if (!postopBodyApplied && part.includes('<text') && part.includes('<tspan') && !part.includes('【') && freeTextApplied && postopTitleApplied) {
-            postopBodyApplied = true;
-            return previewYOffsets.page3PostopBody ? offsetTextY(part, previewYOffsets.page3PostopBody * pxPerCm) : part;
-          }
-          // 【お礼文】本文
-          if (!thanksBodyApplied && part.includes('<text') && part.includes('<tspan') && !part.includes('【') && freeTextApplied && postopTitleApplied && postopBodyApplied) {
-            thanksBodyApplied = true;
-            return previewYOffsets.page3ThanksBody ? offsetTextY(part, previewYOffsets.page3ThanksBody * pxPerCm) : part;
-          }
-          return part;
-        });
-      }
+      // PAGE3 オフセットはrenderer側(buildSvgTextParts)で cursor-based 方式により適用済み
     }
 
     svgParts.push(...textParts);
@@ -1892,8 +1869,14 @@ ${doctor} 先生
 
   const activePreviewYOffsetGroup = useMemo(() => {
     const section = `PAGE${previewPage}` as 'PAGE1' | 'PAGE2' | 'PAGE3';
-    return PREVIEW_Y_OFFSET_UI_GROUPS.find((group) => group.section === section) ?? PREVIEW_Y_OFFSET_UI_GROUPS[0];
-  }, [previewPage]);
+    const group = PREVIEW_Y_OFFSET_UI_GROUPS.find((g) => g.section === section) ?? PREVIEW_Y_OFFSET_UI_GROUPS[0];
+    const items = group.items.filter((item) => {
+      if (item.key === 'page2ThanksBody') return !showPage3;
+      if (item.key === 'page3ThanksBody') return showPage3;
+      return true;
+    });
+    return { ...group, items };
+  }, [previewPage, showPage3]);
 
   const resetCurrentPagePreviewYOffsets = useCallback(() => {
     const targetKeys = Array.from(new Set(activePreviewYOffsetGroup.items.map((item) => item.key)));
@@ -2765,7 +2748,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】　本文</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                   id="initial-textarea"
@@ -2849,7 +2832,7 @@ ${doctor} 先生
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】　本文</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】</label>
                 <textarea
                   ref={page2ProcedureTextareaRef}
                   className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
@@ -2860,7 +2843,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】　本文</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                   placeholder=""
@@ -2873,8 +2856,9 @@ ${doctor} 先生
                   onChange={e => setReportFields(v => ({ ...v, postText: e.target.value }))}
                 />
               </div>
+              {!showPage3 && (
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】　本文</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】</label>
                 <div className="relative" ref={thankYouTextTypeDropdownRef}>
                   <button
                     type="button"
@@ -2933,6 +2917,7 @@ ${doctor} 先生
                   )}
                 </div>
               </div>
+              )}
               {showPage3 && (
                 <div className="bg-white p-3 rounded-xl space-y-2">
                   <div className="flex items-center gap-2">
@@ -2963,6 +2948,68 @@ ${doctor} 先生
                     onChange={e => setReportFields(v => ({ ...v, page3Text: e.target.value }))}
                   />
                 </div>
+              )}
+              {showPage3 && (
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】</label>
+                <div className="relative" ref={thankYouTextTypeDropdownRef}>
+                  <button
+                    type="button"
+                    className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
+                    aria-haspopup="listbox"
+                    aria-expanded={isThankYouTextTypeDropdownOpen}
+                    onFocus={() => {
+                      if (!shouldOpenThankYouTextTypeOnFocusRef.current) return;
+                      shouldOpenThankYouTextTypeOnFocusRef.current = false;
+                      setIsThankYouTextTypeDropdownOpen(true);
+                      setDropdownHighlight(0);
+                    }}
+                    onClick={() => { setIsThankYouTextTypeDropdownOpen(v => !v); setDropdownHighlight(-1); }}
+                    onKeyDown={isThankYouTextTypeDropdownOpen ? (e) => {
+                      const items = [{ value: 'existing' }, { value: 'first-time' }];
+                      handleDropdownKeyDown(e, items.length, (idx) => {
+                        setReportFields(v => ({ ...v, thankYouTextType: items[idx].value }));
+                        setIsThankYouTextTypeDropdownOpen(false);
+                      }, () => setIsThankYouTextTypeDropdownOpen(false));
+                    } : undefined}
+                  >
+                    <span className={reportFields.thankYouTextType ? 'text-slate-900' : 'text-slate-500'}>
+                      {reportFields.thankYouTextType === 'existing'
+                        ? '① 既存紹介先向け'
+                        : '② 初回紹介先向け'}
+                    </span>
+                  </button>
+
+                  {isThankYouTextTypeDropdownOpen && (
+                    <ul
+                      role="listbox"
+                      className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+                    >
+                      {[
+                        { value: 'existing', label: '① 既存紹介先向け' },
+                        { value: 'first-time', label: '② 初回紹介先向け' },
+                      ].map((item, idx) => {
+                        const isSelected = (reportFields.thankYouTextType || 'first-time') === item.value;
+                        const isHighlighted = dropdownHighlight === idx;
+                        return (
+                          <li key={item.value}>
+                            <button
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-base transition-colors ${isHighlighted ? 'bg-orange-100 text-orange-800' : isSelected ? 'bg-orange-50 text-orange-700' : 'text-slate-800 hover:bg-slate-50'}`}
+                              onClick={() => {
+                                setReportFields(v => ({ ...v, thankYouTextType: item.value }));
+                                setIsThankYouTextTypeDropdownOpen(false);
+                              }}
+                            >
+                              {item.label}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
               )}
             </div>
             {/* テンプレートピッカー */}

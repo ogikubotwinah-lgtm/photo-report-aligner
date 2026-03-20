@@ -805,9 +805,9 @@ if (textCfg.HOSPITAL_EMAIL) {
       if (!options?.showPage3) {
         const thankYouBody = getThankYouBody(reportFields);
         if (thankYouBody) {
-          // 5行空けを試み、スペース不足なら最低2行まで縮める
+          // 6行空けを試み、スペース不足なら最低2行まで縮める
           const headingH = headerPostCfg?.h ?? 0;
-          let gapLines = 5;
+          let gapLines = 6;
           while (gapLines > 2 && layoutCursorYcm + gapLines * lineHeightCm + headingH > pageBottomCm) {
             gapLines--;
           }
@@ -848,9 +848,10 @@ if (textCfg.HOSPITAL_EMAIL) {
     const lineHeightPx = fontPx * 1.15;
     const lineHeightCm = lineHeightPx / pxPerCm;
 
-    // 1. 画像（未実装: 画像描画ロジックが必要な場合はここに追加）
-    // 画像の最下端まで cursorY を進める（仮実装: 画像がなければスキップ）
-    // TODO: 画像描画が必要な場合はここで cursorY を調整
+    // 1. 画像がある場合、最下端＋1行分下を自由入力欄の開始位置にする
+    if (typeof options?.page3ImagesBottomYcm === 'number') {
+      cursorY = Math.max(cursorY, options.page3ImagesBottomYcm + lineHeightCm * 1);
+    }
 
     // 2. 【PAGE3】自由入力
     let freeTextHeight = 0;
@@ -859,8 +860,6 @@ if (textCfg.HOSPITAL_EMAIL) {
       const bw = box.w * pxPerCm;
       const bh = box.h * pxPerCm;
       const bx = slideOffsetX + page3StartX * pxPerCm;
-      // 画像がある場合は2行空け、なければそのまま
-      // 今回は画像なし前提なので2行空けは省略
       const ctx = getMeasureContext(fontPx, fontFamily);
       const wrapped = wrapTextByMeasure(reportFields.page3Text, bw, ctx);
       const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
@@ -883,12 +882,11 @@ if (textCfg.HOSPITAL_EMAIL) {
       cursorY += freeTextHeight;
     }
 
-    // 3. 【術後経過】タイトル
+    // 3. 【術後経過】タイトル（PAGE2に術後経過がある場合はスキップ）
     let postopTitleHeight = 0;
-    if (textCfg.SECTION_HEADER_POSTOP_PAGE3) {
+    if (textCfg.SECTION_HEADER_POSTOP_PAGE3 && options?.postPlacement !== 'page2') {
       // 自由入力があれば1行空け
       if (freeTextHeight > 0) cursorY += lineHeightCm;
-      const box = textCfg.SECTION_HEADER_POSTOP_PAGE3;
       const fontPxHeader = ptToPx(LAYOUT.FONTS.SECTION_HEADER);
       const bx = slideOffsetX + page3StartX * pxPerCm;
       const baseY = cursorY;
@@ -901,9 +899,9 @@ if (textCfg.HOSPITAL_EMAIL) {
       cursorY += postopTitleHeight;
     }
 
-    // 4. 【術後経過】本文
+    // 4. 【術後経過】本文（PAGE2に術後経過がある場合はスキップ）
     let postopBodyHeight = 0;
-    if (textCfg.FREE_TEXT_POSTOP_PAGE3 && reportFields.postText) {
+    if (textCfg.FREE_TEXT_POSTOP_PAGE3 && reportFields.postText && options?.postPlacement !== 'page2') {
       const box = textCfg.FREE_TEXT_POSTOP_PAGE3;
       const bw = box.w * pxPerCm;
       const bh = box.h * pxPerCm;
@@ -934,8 +932,6 @@ if (textCfg.HOSPITAL_EMAIL) {
     if (textCfg.FREE_TEXT_THANKS_PAGE3) {
       const thankYouBody = getThankYouBody(reportFields);
       if (thankYouBody) {
-        // 術後経過本文があれば1行空け
-        if (postopBodyHeight > 0) cursorY += lineHeightCm;
         const box = textCfg.FREE_TEXT_THANKS_PAGE3;
         const bw = box.w * pxPerCm;
         const bh = box.h * pxPerCm;
@@ -944,6 +940,14 @@ if (textCfg.HOSPITAL_EMAIL) {
         const wrapped = wrapTextByMeasure(thankYouBody, bw, ctx);
         const maxLines = Math.max(1, Math.floor(bh / lineHeightPx));
         const visible = clampLines(wrapped, maxLines);
+        // 6行空けを試み、スペース不足なら最低2行まで縮める
+        const page3BottomCm = (lineCfg?.SEP_BOTTOM?.y as number | undefined) ?? (LAYOUT.SLIDE.HEIGHT_CM - 1.0);
+        const thanksBodyHeightCm = visible.length * lineHeightCm;
+        let gapLinesP3 = 6;
+        while (gapLinesP3 > 2 && cursorY + gapLinesP3 * lineHeightCm + thanksBodyHeightCm > page3BottomCm) {
+          gapLinesP3--;
+        }
+        cursorY += gapLinesP3 * lineHeightCm;
         const baseY = cursorY;
         const renderedY = baseY + (options?.previewYOffsets?.page3ThanksBody ?? 0);
         const by = slideOffsetY + renderedY * pxPerCm;
