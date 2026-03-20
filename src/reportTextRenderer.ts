@@ -46,6 +46,25 @@ function getPage1InitialBodyMetricsCm(
   };
 }
 
+function getPage1ClosingTextLineCount(
+  textCfg: any,
+  reportFields: ReportFields,
+  fontFamily: string
+): number {
+  const closingCfg = textCfg.FIXED_CLOSING_TEXT;
+  if (!closingCfg) return 1;
+  const closingText = `「${reportFields.chiefComplaint || '[ 主訴 ]'}」という主訴の為、拝見いたしました。`;
+  const fontPx = ptToPx(LAYOUT.FONTS.BODY_BASE);
+  const lineHeight = fontPx * 1.15;
+  const cwPx = (closingCfg.w / 2.54) * 96;
+  const chPx = (closingCfg.h / 2.54) * 96;
+  const maxLines = Math.max(1, Math.floor(chPx / lineHeight));
+  const ctx = getMeasureContext(fontPx, fontFamily);
+  const wrapped = wrapTextByMeasure(closingText, cwPx, ctx);
+  const visible = clampLines(wrapped, maxLines);
+  return Math.max(1, visible.length);
+}
+
 function getPage1InitialBlockLayout(
   textCfg: any,
   reportFields: ReportFields,
@@ -55,11 +74,11 @@ function getPage1InitialBlockLayout(
   const sectionHeaderCfg = textCfg.SECTION_HEADER;
   const imagesHeaderCfg = textCfg.IMAGES_HEADER;
 
-  const sectionHeaderY =
+  const baseSectionHeaderY =
     typeof sectionHeaderCfg?.y === 'number'
       ? PAGE1_INITIAL_SECTION_HEADER_Y_CM
       : sectionHeaderCfg?.y ?? 0;
-  const bodyY =
+  const baseBodyY =
     typeof bodyCfg?.y === 'number' ? PAGE1_INITIAL_BODY_Y_CM : bodyCfg?.y ?? 0;
 
   const { lineHeightCm, bodyLineCount } = getPage1InitialBodyMetricsCm(
@@ -67,6 +86,14 @@ function getPage1InitialBlockLayout(
     reportFields,
     fontFamily
   );
+
+  // 主訴（定型文②）の実描画行数が 2行以上のとき、その分だけ初診セクションを下げる
+  const closingLineCount = getPage1ClosingTextLineCount(textCfg, reportFields, fontFamily);
+  const extraClosingLineCm = Math.max(0, closingLineCount - 1) * lineHeightCm;
+
+  const sectionHeaderY = baseSectionHeaderY + extraClosingLineCm;
+  const bodyY = baseBodyY + extraClosingLineCm;
+
   const imagesHeaderY =
     bodyY + lineHeightCm * (bodyLineCount + PAGE1_IMAGES_HEADER_AFTER_BODY_LINES);
 
@@ -231,11 +258,16 @@ function wrapTextByMeasure(
     while (i < L) {
       if (isJapaneseChar(par[i])) {
         let line = '';
+        let jpCharCount = 0;
+        const fontPx = parseFloat(ctx.font) || 16;
         while (i < L) {
           const next = line + par[i];
-          const w = ctx.measureText(next).width;
+          const measured = ctx.measureText(next).width;
+          const nextJpCount = jpCharCount + (isJapaneseChar(par[i]) ? 1 : 0);
+          const w = Math.max(measured, nextJpCount * fontPx);
           if (w > maxWidthPx && line.length > 0) break;
           line = next;
+          jpCharCount = nextJpCount;
           i += 1;
         }
         out.push(line);

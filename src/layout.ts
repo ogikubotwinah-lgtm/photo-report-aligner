@@ -75,7 +75,7 @@ export const LAYOUT = {
       ANESTHESIA_DATE: withTopOffset({ x: 1.0, y: 9.8, w: 10.0, h: 0.55 }),
 
       // 主訴
-      FIXED_CLOSING_TEXT: withTopOffset({ x: 1.0, y: 10.84, w: 17.0, h: 0.6 }),
+      FIXED_CLOSING_TEXT: withTopOffset({ x: 1.0, y: 10.84, w: 17.0, h: 1.0 }),
 
       // 左端 x=1.0cm
       SECTION_HEADER: { x: 1.0, y: 11.5, w: 3.0, h: 0.6 },

@@ -433,6 +433,8 @@ const App: React.FC = () => {
       const [editingImageId, setEditingImageId] = useState<string | null>(null);
       // 編集モード用サブステート
       const [editStep, setEditStep] = useState<'orientation' | 'crop'>('orientation');
+      const [isOrientationOpen, setIsOrientationOpen] = useState(false);
+      const [isCropOpen, setIsCropOpen] = useState(false);
     const refHospitalInputRef = useRef<HTMLInputElement | null>(null);
   const [showPage3, setShowPage3] = useState(false);
 
@@ -448,12 +450,38 @@ const App: React.FC = () => {
       setShowPage3(true);
     }
     setCurrentPage(page);
+    closeEditUiState();
   }, [showPage3]);
 
   // showPage3 をOFFにした瞬間に 3ページ目に居たら 2へ戻す
   useEffect(() => {
     if (!showPage3 && currentPage === 3) setCurrentPage(2);
   }, [showPage3, currentPage]);
+
+  // 編集系 state の終了処理ヘルパー
+  const closeCropState = () => {
+    setActiveCropImageId(null);
+    setActiveCropViewportRect(null);
+    setIsCropOpen(false);
+  };
+
+  const closeEditUiState = () => {
+    setIsOrientationOpen(false);
+    setIsCropOpen(false);
+    setEditingImageId(null);
+    setActiveCropImageId(null);
+    setActiveCropViewportRect(null);
+  };
+
+  // editingImageId が null になったとき編集用 open state を強制クリア
+  useEffect(() => {
+    if (editingImageId === null) {
+      setIsOrientationOpen(false);
+      setIsCropOpen(false);
+      setActiveCropImageId(null);
+      setActiveCropViewportRect(null);
+    }
+  }, [editingImageId]);
 
   // 既存：参照や他state
   const rowBoardRef = useRef<HTMLDivElement | null>(null);
@@ -783,7 +811,7 @@ const handleUnassignImage = useCallback((id: string) => {
     prev.map(i => (i.id === id ? { ...i, row: 0 } : i))
   );
 
-  setActiveCropImageId(id);
+  closeCropState();
 
   if (currentPage === 1) setPage1Confirmed(false);
   if (currentPage === 2) setPage2Confirmed(false);
@@ -830,10 +858,10 @@ useEffect(() => {
   }, [history, setImages, setHistory]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    console.log('handleFileUpload triggered');
+    const inputEl = e.currentTarget;
     const files = Array.from(e.target.files || []) as File[];
     if (!files.length) {
-      e.currentTarget.value = '';
+      inputEl.value = '';
       return;
     }
     recordHistory();
@@ -869,10 +897,12 @@ useEffect(() => {
       })
     );
     setImages((prev: ImageData[]) => [...prev, ...newImages]);
+    closeEditUiState();
     if (currentPage === 1) setPage1Confirmed(false);
     if (currentPage === 2) setPage2Confirmed(false);
     if (currentPage === 3) setPage3Confirmed(false);
-    e.currentTarget.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    else inputEl.value = '';
   };
 
   const rotateImage = (id: string, direction: 'left' | 'right') => {
@@ -970,13 +1000,15 @@ useEffect(() => {
   }, [setImages]);
 
   const resetImageCrop = useCallback((id: string) => {
+    const target = images.find(i => i.id === id);
+    console.log('RESET CROP', { imgId: id, beforeDataUrlLength: target?.dataUrl?.length, beforeOriginalDataUrlLength: target?.originalDataUrl?.length, beforeCrop: target?.crop });
     setImages((prev: ImageData[]) => {
       return prev.map((img) => {
         if (img.id !== id) return img;
         return { ...img, crop: undefined } as ImageData;
       });
     });
-  }, [setImages]);
+  }, [setImages, images]);
 
   const startCropDrag = useCallback((e: React.MouseEvent, id: string, handle: CropHandle) => {
     e.preventDefault();
@@ -1161,6 +1193,7 @@ useEffect(() => {
   const getImageDisplayStyle = useCallback((img: ImageData): CSSProperties => {
     const crop = getImageCrop(img);
     const isActiveCropTarget = activeCropImageId === img.id && !!activeCropViewportRect;
+    console.log('DISPLAY STYLE', { imgId: img.id, crop: getImageCrop(img), isActiveCropTarget: activeCropImageId === img.id && !!activeCropViewportRect, activeCropViewportRect, rotation: img.rotation, flipX: img.flipX, flipY: img.flipY });
 
     const flipX = img.flipX ? -1 : 1;
     const flipY = img.flipY ? -1 : 1;
@@ -1231,17 +1264,30 @@ useEffect(() => {
     const containerW = options.containerWidth;
     const baseSpacing = options.spacing;
     const targetBoxHPx = (dims.maxH / dims.maxW) * containerW;
+    const isPage2 = pageNum === 2;
     let totalBlockHeight = 0;
     const rawData = activeRows.map(rowImages => {
       const count = rowImages.length;
       const ars = rowImages.map(img => {
         const isPortrait = img.rotation === 90 || img.rotation === 270;
-        return isPortrait ? (img.height / img.width) : (img.width / img.height);
+        const baseAR = isPortrait ? (img.height / img.width) : (img.width / img.height);
+        const crop = getImageCrop(img);
+        if (!crop) return baseAR;
+        const visW = crop.right - crop.left;
+        const visH = crop.bottom - crop.top;
+        if (visW <= 0 || visH <= 0) return baseAR;
+        return baseAR * (isPortrait ? (visH / visW) : (visW / visH));
       });
       const totalAR = ars.reduce((a, b) => a + b, 0);
-      const isFew = count <= 2;
+      const isFew = !isPage2 && count <= 1;
       let rowH;
-      if (isFew) {
+      if (isPage2) {
+        // PAGE2: always fill container width using post-crop AR, cap at full area height
+        rowH = Math.min(
+          (containerW - Math.max(0, count - 1) * baseSpacing) / totalAR,
+          targetBoxHPx
+        );
+      } else if (isFew) {
         const avgAR = totalAR / count;
         const totalAR_for_5 = avgAR * 5;
         rowH = (containerW - (5 - 1) * baseSpacing) / totalAR_for_5;
@@ -1253,7 +1299,7 @@ useEffect(() => {
       return { rowImages, rowH, ars, count, isFew };
     });
     totalBlockHeight += (rawData.length - 1) * baseSpacing;
-    const fitScale = Math.min(1, targetBoxHPx / totalBlockHeight);
+    const fitScale = isPage2 ? 1.0 : Math.min(1, targetBoxHPx / totalBlockHeight);
     const finalSpacing = baseSpacing * fitScale;
     const rowResults: any[] = [];
     let curY = 0;
@@ -1284,7 +1330,7 @@ useEffect(() => {
       curY += scaledH + finalSpacing;
     });
     return { rowResults, finalHeight: targetBoxHPx };
-  }, [options.containerWidth, options.spacing, getPageDimensions]);
+  }, [options.containerWidth, options.spacing, getPageDimensions, getImageCrop]);
 
   const clampPage1ImageCm = useCallback((xCm: number, yCm: number, wCm: number, hCm: number) => {
     const leftBoundCm = LAYOUT.PAGE1.IMAGES.LEFT;
@@ -1423,6 +1469,22 @@ useEffect(() => {
     };
 
     const nearlyEqual = (a: number, b: number) => Math.abs(a - b) < 0.1;
+
+    // PAGE3かつ術後経過をPAGE2に置く設定のとき、PAGE3側の術後経過タイトル・本文を除去する
+    if (pageNum === 3 && postPlacement === 'page2') {
+      let skipNextBody = false;
+      textParts = textParts.filter((part) => {
+        if (part.includes('【術後経過】')) {
+          skipNextBody = true;
+          return false;
+        }
+        if (skipNextBody && part.includes('<text') && part.includes('<tspan') && !part.includes('【')) {
+          skipNextBody = false;
+          return false;
+        }
+        return true;
+      });
+    }
 
     if (renderOpts?.applyPreviewOffsets) {
       if (pageNum === 1) {
@@ -2148,6 +2210,12 @@ ${doctor} 先生
       const inputType = (inputEl.type || 'text').toLowerCase();
       if (['checkbox', 'radio', 'file', 'button', 'submit', 'reset'].includes(inputType)) return;
 
+      if (inputEl.id === 'ref-doctor-input') {
+        e.preventDefault();
+        focusAndScroll(document.getElementById('chief-complaint-input'));
+        return;
+      }
+
       if (inputEl.id === 'chief-complaint-input') {
         e.preventDefault();
         const initialTextArea = document.getElementById('initial-textarea') as HTMLTextAreaElement | null;
@@ -2618,22 +2686,6 @@ ${doctor} 先生
                 PAGE3を追加する
               </label>
 
-              {showPage3 && (
-                <label className="flex items-center gap-2 text-base text-slate-700">
-                  <input
-                    type="checkbox"
-                    className="bg-white"
-                    checked={includePage2InExport}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Tab' && !e.shiftKey) {
-                        shouldOpenPostPlacementOnFocusRef.current = true;
-                      }
-                    }}
-                    onChange={e => setIncludePage2InExport(e.target.checked)}
-                  />
-                  PAGE2を出力に含める
-                </label>
-              )}
 
               {showPage3 && (
                 <div className="space-y-1">
@@ -2705,6 +2757,7 @@ ${doctor} 先生
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">主訴</label>
                 <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.chiefComplaint)} bg-white`}
+                  style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
                   id="chief-complaint-input"
                   placeholder="主な症状や主訴"
                   value={reportFields.chiefComplaint}
@@ -2712,8 +2765,9 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】本文 (Page 1)</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【初診時】　本文</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
+                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                   id="initial-textarea"
                   placeholder="初診時の所見など..."
                   value={reportFields.initialText}
@@ -2795,18 +2849,20 @@ ${doctor} 先生
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】本文 (Page 2)</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【検査・処置内容】　本文</label>
                 <textarea
                   ref={page2ProcedureTextareaRef}
                   className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
+                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                   placeholder=""
                   value={reportFields.procedureText}
                   onChange={e => setReportFields(v => ({ ...v, procedureText: e.target.value }))}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】本文 ({showPage3 && postPlacement === 'page3' ? 'Page 3' : 'Page 2'})</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【術後経過】　本文</label>
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
+                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                   placeholder=""
                   value={reportFields.postText}
                   onKeyDown={(e) => {
@@ -2818,7 +2874,7 @@ ${doctor} 先生
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】本文 (Page 2)</label>
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【お礼文】　本文</label>
                 <div className="relative" ref={thankYouTextTypeDropdownRef}>
                   <button
                     type="button"
@@ -2899,8 +2955,9 @@ ${doctor} 先生
               )}
               {showPage3 && (
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【PAGE3】自由入力</label>
+                  <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">【自由入力】　PAGE3</label>
                   <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
+                    style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                     placeholder=""
                     value={reportFields.page3Text || ''}
                     onChange={e => setReportFields(v => ({ ...v, page3Text: e.target.value }))}
@@ -3097,160 +3154,172 @@ ${doctor} 先生
                           <div className="grid grid-cols-3 gap-2 items-start w-full">
                             {editingImageId === img.id ? (
                               <>
-                                {/* 操作パネル2カラム化: 左=向き編集, 右=トリミング */}
-                                <div className="flex gap-2 w-full">
-                                  {/* 左: 向き編集 */}
-                                  <div className="flex-1 flex flex-col gap-2">
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <button onClick={() => rotateImage(img.id, "left")} className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9" /></svg></button>
-                                      <button onClick={() => rotateImage(img.id, 'right')} className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 4v5h-.582m-15.356 2A8.001 8.001 0 0119.418 9m0 0H15" /></svg></button>
-                                      <button onClick={() => flipImageX(img.id)} className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 12h16M10 16l-4-4 4-4" /></svg></button>
-                                      <button onClick={() => flipImageY(img.id)} className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16M16 10l-4-4-4 4" /></svg></button>
+                                {/* 操作パネル: 回転・反転 | トリミング ドロップダウン */}
+                                <div className="col-span-3 flex flex-col gap-2 w-full">
+                                  <div className="flex gap-2 w-full">
+                                    {/* 左: 回転・反転ドロップダウン */}
+                                    <div className="flex-1 flex flex-col gap-1">
+                                      <button
+                                        onClick={() => setIsOrientationOpen(v => !v)}
+                                        disabled={isCropOpen || isOrientationOpen}
+                                        className={`h-10 rounded-lg border text-sm font-semibold transition-all shadow-sm whitespace-nowrap bg-indigo-100 text-indigo-800 border-indigo-200 hover:bg-indigo-200 active:scale-95 ${isCropOpen || isOrientationOpen ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                      >回転・反転</button>
+                                      {isOrientationOpen && (
+                                        <div className="flex flex-col gap-1 mt-1">
+                                          <div className="grid grid-cols-2 gap-1">
+                                            <button onClick={() => rotateImage(img.id, 'left')} className="h-9 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all active:scale-95 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9" /></svg></button>
+                                            <button onClick={() => rotateImage(img.id, 'right')} className="h-9 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all active:scale-95 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M20 4v5h-.582m-15.356 2A8.001 8.001 0 0119.418 9m0 0H15" /></svg></button>
+                                            <button onClick={() => flipImageX(img.id)} className="h-9 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all active:scale-95 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 12h16M10 16l-4-4 4-4" /></svg></button>
+                                            <button onClick={() => flipImageY(img.id)} className="h-9 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition-all active:scale-95 flex items-center justify-center"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16M16 10l-4-4-4 4" /></svg></button>
+                                          </div>
+                                          <button
+                                            onClick={async () => {
+                                              recordHistory();
+                                              const image = new window.Image();
+                                              image.src = img.dataUrl;
+                                              await new Promise(resolve => { image.onload = resolve; });
+                                              const rotated = img.rotation === 90 || img.rotation === 270;
+                                              const canvasW = rotated ? image.naturalHeight : image.naturalWidth;
+                                              const canvasH = rotated ? image.naturalWidth : image.naturalHeight;
+                                              const canvas = document.createElement('canvas');
+                                              canvas.width = canvasW;
+                                              canvas.height = canvasH;
+                                              const ctx = canvas.getContext('2d');
+                                              if (ctx) {
+                                                ctx.save();
+                                                ctx.translate(canvasW / 2, canvasH / 2);
+                                                ctx.rotate((img.rotation * Math.PI) / 180);
+                                                ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
+                                                ctx.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2, image.naturalWidth, image.naturalHeight);
+                                                ctx.restore();
+                                              }
+                                              const bakedDataUrl = canvas.toDataURL();
+                                              setImages((prev: ImageData[]) =>
+                                                prev.map(i =>
+                                                  i.id === img.id
+                                                    ? { ...i, dataUrl: bakedDataUrl, rotation: 0, flipX: false, flipY: false, crop: undefined, width: canvasW, height: canvasH }
+                                                    : i
+                                                )
+                                              );
+                                              closeCropState();
+                                              setIsOrientationOpen(false);
+                                            }}
+                                            className="h-9 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 text-sm font-semibold transition-all active:scale-95"
+                                          >確定</button>
+                                        </div>
+                                      )}
                                     </div>
-                                    <button
-                                      onClick={async () => {
-                                        recordHistory();
-                                        // 画像をcanvasで焼き直し
-                                        const image = new window.Image();
-                                        image.src = img.dataUrl;
-                                        await new Promise(resolve => { image.onload = resolve; });
-                                        const canvas = document.createElement('canvas');
-                                        canvas.width = image.naturalWidth;
-                                        canvas.height = image.naturalHeight;
-                                        const ctx = canvas.getContext('2d');
-                                        if (ctx) {
-                                          ctx.save();
-                                          // 回転・反転を反映
-                                          if (img.flipX || img.flipY) {
-                                            ctx.translate(canvas.width / 2, canvas.height / 2);
-                                            ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
-                                            ctx.rotate((img.rotation * Math.PI) / 180);
-                                            ctx.drawImage(
-                                              image,
-                                              -canvas.width / 2,
-                                              -canvas.height / 2,
-                                              canvas.width,
-                                              canvas.height
-                                            );
-                                          } else if (img.rotation) {
-                                            ctx.translate(canvas.width / 2, canvas.height / 2);
-                                            ctx.rotate((img.rotation * Math.PI) / 180);
-                                            ctx.drawImage(
-                                              image,
-                                              -canvas.width / 2,
-                                              -canvas.height / 2,
-                                              canvas.width,
-                                              canvas.height
-                                            );
-                                          } else {
-                                            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+                                    {/* 右: トリミングドロップダウン */}
+                                    <div className="flex-1 flex flex-col gap-1 border-l border-slate-200 pl-2">
+                                      <button
+                                        onClick={() => {
+                                          console.log('TRIM START', { imgId: img.id, row: img.row, dataUrlLength: img.dataUrl?.length, crop: getImageCrop(img), activeCropImageId, activeCropViewportRect, rotation: img.rotation, flipX: img.flipX, flipY: img.flipY });
+                                          // 古いトリミング状態を先にクリアして isActiveCropTarget を false にする
+                                          setActiveCropImageId(null);
+                                          setActiveCropViewportRect(null);
+                                          if (!getImageCrop(img)) {
+                                            updateImageCrop(img.id, () => DEFAULT_IMAGE_CROP);
                                           }
-                                          ctx.restore();
-                                        }
-                                        const bakedDataUrl = canvas.toDataURL();
-                                        // 新しい画像サイズ取得
-                                        let newWidth = image.naturalWidth;
-                                        let newHeight = image.naturalHeight;
-                                        setImages((prev: ImageData[]) =>
-                                          prev.map(i =>
-                                            i.id === img.id
-                                              ? {
-                                                  ...i,
-                                                  dataUrl: bakedDataUrl,
-                                                  crop: undefined,
-                                                  rotation: 0,
-                                                  flipX: false,
-                                                  flipY: false,
-                                                  width: newWidth,
-                                                  height: newHeight
-                                                }
-                                              : i
-                                          )
-                                        );
-                                        // トリミング状態を完全リセット
-                                        setActiveCropImageId(null);
-                                        setActiveCropViewportRect(null);
-                                      }}
-                                      className="h-10 rounded-lg bg-indigo-200 text-indigo-900 hover:bg-indigo-300 border border-indigo-300 transition-all shadow-sm flex items-center justify-center active:scale-95 whitespace-nowrap"
-                                      title="向きを確定"
-                                    >
-                                      向きを反映
-                                    </button>
-                                  </div>
-                                  {/* 右: トリミング */}
-                                  <div className="flex-1 flex flex-col gap-2">
-                                    <button
-                                      onClick={() => {
-                                        if (!getImageCrop(img)) {
-                                          updateImageCrop(img.id, () => DEFAULT_IMAGE_CROP);
-                                        }
-                                        const imageEl = document.getElementById(`crop-image-${img.id}`) as HTMLImageElement | null;
-                                        if (imageEl) {
+                                          setIsCropOpen(true);
                                           requestAnimationFrame(() => {
-                                            const rect = imageEl.getBoundingClientRect();
-                                            // 親要素基準に合わせる場合は調整（ここではwindow基準のまま）
-                                            setActiveCropViewportRect({
-                                              left: rect.left,
-                                              top: rect.top,
-                                              width: rect.width,
-                                              height: rect.height,
-                                            });
+                                            const imageEl = document.getElementById(`crop-image-${img.id}`) as HTMLImageElement | null;
+                                            if (imageEl) {
+                                              const rect = imageEl.getBoundingClientRect();
+                                              setActiveCropViewportRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+                                            } else {
+                                              setActiveCropViewportRect(null);
+                                            }
                                             setActiveCropImageId(img.id);
                                           });
-                                        } else {
-                                          setActiveCropImageId(img.id);
-                                        }
-                                      }}
-                                      className={`h-10 rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 whitespace-nowrap min-w-[88px] ${activeCropImageId === img.id ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'}`}
-                                    >トリミング</button>
-                                    <button onClick={() => { recordHistory(); resetImageCrop(img.id); }} className="h-10 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100 whitespace-nowrap min-w-[88px]">リセット</button>
+                                        }}
+                                        disabled={isOrientationOpen || img.rotation !== 0 || !!img.flipX || !!img.flipY}
+                                        title={img.rotation !== 0 || !!img.flipX || !!img.flipY ? '向きを反映してからトリミングしてください' : undefined}
+                                        className={`h-10 rounded-lg border text-sm font-semibold transition-all shadow-sm whitespace-nowrap ${isCropOpen ? 'bg-emerald-200 text-emerald-900 border-emerald-300' : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'} ${isOrientationOpen || img.rotation !== 0 || !!img.flipX || !!img.flipY ? 'opacity-40 cursor-not-allowed' : 'active:scale-95'}`}
+                                      >トリミング</button>
+                                      {isCropOpen && (
+                                        <div className="flex flex-col gap-1 mt-1">
+                                          <button
+                                            onClick={() => { recordHistory(); resetImageCrop(img.id); }}
+                                            className="h-9 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-sm font-semibold transition-all active:scale-95"
+                                          >リセット</button>
+                                          <button
+                                            onClick={async () => {
+                                              const crop = getImageCrop(img);
+                                              if (crop && activeCropViewportRect) {
+                                                const image = new window.Image();
+                                                image.src = img.dataUrl;
+                                                await new Promise(resolve => { image.onload = resolve; });
+                                                const canvas = document.createElement('canvas');
+                                                const viewportW = activeCropViewportRect.width;
+                                                const viewportH = activeCropViewportRect.height;
+                                                const imageAspect = image.naturalWidth / image.naturalHeight;
+                                                const viewportAspect = viewportW / viewportH;
+                                                let drawWidth: number, drawHeight: number, offsetX: number, offsetY: number;
+                                                if (imageAspect > viewportAspect) {
+                                                  drawWidth = viewportW;
+                                                  drawHeight = viewportW / imageAspect;
+                                                  offsetX = 0;
+                                                  offsetY = (viewportH - drawHeight) / 2;
+                                                } else {
+                                                  drawHeight = viewportH;
+                                                  drawWidth = viewportH * imageAspect;
+                                                  offsetY = 0;
+                                                  offsetX = (viewportW - drawWidth) / 2;
+                                                }
+                                                const adjLeft   = Math.max(0, Math.min(1, (crop.left   * viewportW - offsetX) / drawWidth));
+                                                const adjTop    = Math.max(0, Math.min(1, (crop.top    * viewportH - offsetY) / drawHeight));
+                                                const adjRight  = Math.max(0, Math.min(1, (crop.right  * viewportW - offsetX) / drawWidth));
+                                                const adjBottom = Math.max(0, Math.min(1, (crop.bottom * viewportH - offsetY) / drawHeight));
+                                                const sx = Math.round(adjLeft   * image.naturalWidth);
+                                                const sy = Math.round(adjTop    * image.naturalHeight);
+                                                const sw = Math.round((adjRight  - adjLeft)  * image.naturalWidth);
+                                                const sh = Math.round((adjBottom - adjTop)   * image.naturalHeight);
+                                                canvas.width = sw;
+                                                canvas.height = sh;
+                                                const ctx = canvas.getContext('2d');
+                                                if (ctx) {
+                                                  ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+                                                  const croppedDataUrl = canvas.toDataURL();
+                                                  setImages((prev: ImageData[]) =>
+                                                    prev.map(i =>
+                                                      i.id === img.id
+                                                        ? { ...i, dataUrl: croppedDataUrl, crop: undefined, width: sw, height: sh }
+                                                        : i
+                                                    )
+                                                  );
+                                                }
+                                              }
+                                              closeCropState();
+                                            }}
+                                            className="h-9 rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-200 text-sm font-semibold transition-all active:scale-95"
+                                          >確定</button>
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
+                                  {/* 編集を閉じる: 常に表示・独立 */}
+                                  <button
+                                    onClick={() => {
+                                      closeEditUiState();
+                                      setEditStep('orientation');
+                                    }}
+                                    className="h-10 rounded-lg border border-slate-300 bg-white text-slate-600 text-sm font-semibold hover:bg-slate-100 w-full transition-all active:scale-95"
+                                  >編集を閉じる</button>
                                 </div>
-                                <button onClick={() => { setEditingImageId(null); setEditStep('orientation'); }} className="h-10 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100 mt-2 mt-auto whitespace-nowrap min-w-[88px]">編集を閉じる</button>
                               </>
                             ) : (
                               <>
                                 {/* 通常モード用ボタン群 */}
                                 {/* 右列: 段落番号ボタン */}
-                                {editingImageId === null && (
+                                {editingImageId !== img.id && (
                                   <div className="flex flex-col justify-between items-stretch" style={{ minHeight: 'calc(100% - 4px)', gap: '10px', height: '100%' }}>
                                     {[1, 2, 3, 4].map(num => (
                                       <button
                                         key={num}
-                                        onClick={async () => {
-                                          // 以前の段落割り当て処理を復元
-                                          const crop = getImageCrop(img);
-                                          let croppedDataUrl = img.dataUrl;
-                                          if (crop) {
-                                            const image = new window.Image();
-                                            image.src = img.dataUrl;
-                                            await new Promise(resolve => { image.onload = resolve; });
-                                            const canvas = document.createElement('canvas');
-                                            const sx = Math.round(crop.left * image.naturalWidth);
-                                            const sy = Math.round(crop.top * image.naturalHeight);
-                                            const sw = Math.round((crop.right - crop.left) * image.naturalWidth);
-                                            const sh = Math.round((crop.bottom - crop.top) * image.naturalHeight);
-                                            canvas.width = sw;
-                                            canvas.height = sh;
-                                            const ctx = canvas.getContext('2d');
-                                            if (ctx) {
-                                              ctx.drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
-                                              croppedDataUrl = canvas.toDataURL();
-                                            }
-                                            setImages((prev: ImageData[]) =>
-                                              prev.map(i =>
-                                                i.id === img.id
-                                                  ? {
-                                                      ...i,
-                                                      dataUrl: croppedDataUrl,
-                                                      crop: undefined
-                                                    }
-                                                  : i
-                                              )
-                                            );
-                                          }
+                                        onClick={() => {
+                                          closeCropState();
+                                          setEditingImageId(null);
                                           updateImageRow(img.id, num);
-                                          // isLastUnassigned の判定と page confirmed の更新処理（必要なら）
                                           const isLastUnassigned = unassignedImages.length === 1 && img.row === 0;
                                           if (isLastUnassigned) {
                                             if (currentPage === 1) setPage1Confirmed(true);
