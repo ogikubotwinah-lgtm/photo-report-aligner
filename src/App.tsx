@@ -500,6 +500,7 @@ const App: React.FC = () => {
   const postPlacementDropdownRef = useRef<HTMLDivElement | null>(null);
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
   const thankYouTextTypeDropdownRef = useRef<HTMLDivElement | null>(null);
+  const pageSwitcherRef = useRef<HTMLDivElement | null>(null);
   const [isThankYouTextTypeDropdownOpen, setIsThankYouTextTypeDropdownOpen] = useState(false);
   const [dropdownHighlight, setDropdownHighlight] = useState(-1);
   const shouldOpenAttendingVetOnFocusRef = useRef(false);
@@ -1253,10 +1254,15 @@ useEffect(() => {
 
 
 
-  // 確定後に RowBoard へスクロール
+  // 確定後に RowBoard へスクロール（段落ドラッグ移動エリアの見出しが見やすい位置）
   useEffect(() => {
     if (page1Confirmed || page2Confirmed || page3Confirmed) {
-      rowBoardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      requestAnimationFrame(() => {
+        const el = rowBoardRef.current;
+        if (!el) return;
+        const top = el.getBoundingClientRect().top + window.scrollY - 140;
+        window.scrollTo({ top, behavior: 'smooth' });
+      });
     }
   }, [page1Confirmed, page2Confirmed, page3Confirmed]);
 
@@ -2787,7 +2793,7 @@ ${doctor} 先生
                           setIsPage2PhotoCategoryDropdownOpen(false);
                         },
                         () => setIsPage2PhotoCategoryDropdownOpen(false),
-                        () => page2ProcedureTextareaRef.current?.focus()
+                        () => focusAndScroll(page2ProcedureTextareaRef.current ?? null)
                       );
                     } : undefined}
                   >
@@ -2849,8 +2855,13 @@ ${doctor} 先生
                   placeholder=""
                   value={reportFields.postText}
                   onKeyDown={(e) => {
-                    if (e.key === 'Tab' && !e.shiftKey) {
-                      shouldOpenThankYouTextTypeOnFocusRef.current = true;
+                    if (e.key === 'Tab' && !e.shiftKey && !showPage3) {
+                      setTimeout(() => {
+                        if (pageSwitcherRef.current) {
+                          const top = pageSwitcherRef.current.getBoundingClientRect().top + window.scrollY - 80;
+                          window.scrollTo({ top, behavior: 'smooth' });
+                        }
+                      }, 30);
                     }
                   }}
                   onChange={e => setReportFields(v => ({ ...v, postText: e.target.value }))}
@@ -2862,6 +2873,7 @@ ${doctor} 先生
                 <div className="relative" ref={thankYouTextTypeDropdownRef}>
                   <button
                     type="button"
+                    tabIndex={-1}
                     className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
                     aria-haspopup="listbox"
                     aria-expanded={isThankYouTextTypeDropdownOpen}
@@ -2877,7 +2889,13 @@ ${doctor} 先生
                       handleDropdownKeyDown(e, items.length, (idx) => {
                         setReportFields(v => ({ ...v, thankYouTextType: items[idx].value }));
                         setIsThankYouTextTypeDropdownOpen(false);
-                      }, () => setIsThankYouTextTypeDropdownOpen(false));
+                      }, () => setIsThankYouTextTypeDropdownOpen(false),
+                      () => {
+                        if (pageSwitcherRef.current) {
+                          const top = pageSwitcherRef.current.getBoundingClientRect().top + window.scrollY - 80;
+                          window.scrollTo({ top, behavior: 'smooth' });
+                        }
+                      });
                     } : undefined}
                   >
                     <span className={reportFields.thankYouTextType ? 'text-slate-900' : 'text-slate-500'}>
@@ -2945,6 +2963,16 @@ ${doctor} 先生
                     style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                     placeholder=""
                     value={reportFields.page3Text || ''}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Tab' && !e.shiftKey) {
+                        setTimeout(() => {
+                          if (pageSwitcherRef.current) {
+                            const top = pageSwitcherRef.current.getBoundingClientRect().top + window.scrollY - 80;
+                            window.scrollTo({ top, behavior: 'smooth' });
+                          }
+                        }, 30);
+                      }
+                    }}
                     onChange={e => setReportFields(v => ({ ...v, page3Text: e.target.value }))}
                   />
                 </div>
@@ -2955,6 +2983,7 @@ ${doctor} 先生
                 <div className="relative" ref={thankYouTextTypeDropdownRef}>
                   <button
                     type="button"
+                    tabIndex={-1}
                     className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
                     aria-haspopup="listbox"
                     aria-expanded={isThankYouTextTypeDropdownOpen}
@@ -3422,7 +3451,7 @@ ${doctor} 先生
         </div>
 
         {/* PAGE切替ボタン（段落エリアとプレビューの間） */}
-        <div className="lg:col-span-12 grid grid-cols-3 items-center my-4">
+        <div ref={pageSwitcherRef} className="lg:col-span-12 grid grid-cols-3 items-center my-4">
   <div className="justify-self-start min-w-[180px]" />
   <div className="justify-self-center">
     <PageSwitcher
