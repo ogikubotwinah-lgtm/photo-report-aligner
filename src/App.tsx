@@ -142,31 +142,16 @@ function rotatePoint(x: number, y: number, cx: number, cy: number, deg: number):
 function cropToPixels(
   crop: ImageCrop,
   viewport: Pick<CropViewportRect, 'width' | 'height'>,
-  rotation: number = 0,
-  flipX: boolean = false,
-  flipY: boolean = false
+  rotation: number = 0
 ): CropPixelRect {
   // 画像の中心
   const cx = viewport.width / 2;
   const cy = viewport.height / 2;
   // 非回転時の矩形
-  let left = crop.left * viewport.width;
-  let top = crop.top * viewport.height;
-  let right = crop.right * viewport.width;
-  let bottom = crop.bottom * viewport.height;
-  // flipX/flipYを反映
-  if (flipX) {
-    const l = left;
-    const r = right;
-    left = viewport.width - r;
-    right = viewport.width - l;
-  }
-  if (flipY) {
-    const t = top;
-    const b = bottom;
-    top = viewport.height - b;
-    bottom = viewport.height - t;
-  }
+  const left = crop.left * viewport.width;
+  const top = crop.top * viewport.height;
+  const right = crop.right * viewport.width;
+  const bottom = crop.bottom * viewport.height;
   // 4隅を回転
   const p1 = rotatePoint(left, top, cx, cy, rotation);
   const p2 = rotatePoint(right, top, cx, cy, rotation);
@@ -186,9 +171,7 @@ function cropToPixels(
 function pixelsToCrop(
   pixelRect: CropPixelRect,
   viewport: Pick<CropViewportRect, 'width' | 'height'>,
-  rotation: number = 0,
-  flipX: boolean = false,
-  flipY: boolean = false
+  rotation: number = 0
 ): ImageCrop {
   // 画像の中心
   const cx = viewport.width / 2;
@@ -199,18 +182,11 @@ function pixelsToCrop(
   const p3 = rotatePoint(pixelRect.left, pixelRect.bottom, cx, cy, -rotation);
   const p4 = rotatePoint(pixelRect.right, pixelRect.bottom, cx, cy, -rotation);
   // 非回転時の外接矩形
-  let xs = [p1.x, p2.x, p3.x, p4.x];
-  let ys = [p1.y, p2.y, p3.y, p4.y];
+  const xs = [p1.x, p2.x, p3.x, p4.x];
+  const ys = [p1.y, p2.y, p3.y, p4.y];
   const w = viewport.width;
   const h = viewport.height;
   if (w <= 0 || h <= 0) return DEFAULT_IMAGE_CROP;
-  // flipX/flipYを逆変換
-  if (flipX) {
-    xs = xs.map(x => w - x);
-  }
-  if (flipY) {
-    ys = ys.map(y => h - y);
-  }
   return normalizeImageCrop({
     left: Math.min(...xs) / w,
     top: Math.min(...ys) / h,
@@ -851,8 +827,6 @@ useEffect(() => {
                 row: 0,
                 orderConfirmed: false,
                 rotation: 0,
-                flipX: false,
-                flipY: false,
                 originalDataUrl: dataUrl,
                 originalWidth: img.width,
                 originalHeight: img.height
@@ -878,76 +852,25 @@ useEffect(() => {
         let newRotation = direction === 'right' ? img.rotation + 90 : img.rotation - 90;
         if (newRotation < 0) newRotation = 270;
         if (newRotation >= 360) newRotation = 0;
+        // cropも回転後の座標系に変換
         let newCrop = (img as any).crop;
         if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
+          // 1. 現在のcropをピクセル座標に変換（回転前）
           const cropPx = cropToPixels(
             normalizeImageCrop(newCrop),
             activeCropViewportRect,
-            img.rotation,
-            img.flipX,
-            img.flipY
+            img.rotation
           );
+          // 2. ピクセル座標を新しいrotationでcropに逆変換
           newCrop = pixelsToCrop(
             cropPx,
             activeCropViewportRect,
-            newRotation,
-            img.flipX,
-            img.flipY
+            newRotation
           );
         }
-        return { ...img, rotation: newRotation, crop: newCrop, flipX: img.flipX, flipY: img.flipY };
+        return { ...img, rotation: newRotation, crop: newCrop };
       }
       return img;
-    }));
-  };
-
-  const flipImageX = (id: string) => {
-    setImages((prev: ImageData[]) => prev.map(img => {
-      if (img.id !== id) return img;
-      let newCrop = (img as any).crop;
-      if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
-        const cropPx = cropToPixels(
-          normalizeImageCrop(newCrop),
-          activeCropViewportRect,
-          img.rotation,
-          img.flipX,
-          img.flipY
-        );
-        // X反転: flipXをトグルして新しい座標系に変換
-        newCrop = pixelsToCrop(
-          cropPx,
-          activeCropViewportRect,
-          img.rotation,
-          !img.flipX,
-          img.flipY
-        );
-      }
-      return { ...img, flipX: !img.flipX, crop: newCrop };
-    }));
-  };
-
-  const flipImageY = (id: string) => {
-    setImages((prev: ImageData[]) => prev.map(img => {
-      if (img.id !== id) return img;
-      let newCrop = (img as any).crop;
-      if (newCrop && typeof newCrop === 'object' && activeCropViewportRect) {
-        const cropPx = cropToPixels(
-          normalizeImageCrop(newCrop),
-          activeCropViewportRect,
-          img.rotation,
-          img.flipX,
-          img.flipY
-        );
-        // Y反転: flipYをトグルして新しい座標系に変換
-        newCrop = pixelsToCrop(
-          cropPx,
-          activeCropViewportRect,
-          img.rotation,
-          img.flipX,
-          !img.flipY
-        );
-      }
-      return { ...img, flipY: !img.flipY, crop: newCrop };
     }));
   };
 
@@ -986,6 +909,16 @@ useEffect(() => {
     setImages((prev: ImageData[]) => {
       return prev.map((img) => {
         if (img.id !== id) return img;
+        if (img.originalDataUrl) {
+          return {
+            ...img,
+            dataUrl: img.originalDataUrl ?? img.dataUrl,
+            width: img.originalWidth ?? img.width,
+            height: img.originalHeight ?? img.height,
+            crop: undefined
+            // original系は絶対に触らない
+          };
+        }
         return { ...img, crop: undefined } as ImageData;
       });
     });
@@ -1113,9 +1046,7 @@ useEffect(() => {
       // 画像のrotationを考慮
       const img = images.find((img) => img.id === dragState.imageId);
       const rotation = img?.rotation ?? 0;
-      const flipX = img?.flipX ?? false;
-      const flipY = img?.flipY ?? false;
-      const basePixels = cropToPixels(base, viewport, rotation, flipX, flipY);
+      const basePixels = cropToPixels(base, viewport, rotation);
 
       if (dragState.mode === 'move') {
         const width = basePixels.right - basePixels.left;
@@ -1128,7 +1059,7 @@ useEffect(() => {
           right: nextLeft + width,
           bottom: nextTop + height,
         };
-        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport, rotation, flipX, flipY));
+        updateImageCrop(dragState.imageId, () => pixelsToCrop(movedPixels, viewport, rotation));
         return;
       }
 
@@ -1153,7 +1084,7 @@ useEffect(() => {
       }
 
       const normalizedPixels = normalizeCropPixelRectByHandle(nextPixels, dragState.handle, viewport);
-      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport, rotation, flipX, flipY), dragState.handle);
+      const normalized = normalizeImageCropByHandle(pixelsToCrop(normalizedPixels, viewport, rotation), dragState.handle);
       updateImageCrop(dragState.imageId, () => normalized);
     };
 
@@ -1175,13 +1106,12 @@ useEffect(() => {
     const crop = getImageCrop(img);
     const isActiveCropTarget = activeCropImageId === img.id && !!activeCropViewportRect;
 
-    const flipX = img.flipX ? -1 : 1;
-    const flipY = img.flipY ? -1 : 1;
     if (isActiveCropTarget) {
       const insetTop = (crop ?? DEFAULT_IMAGE_CROP).top * 100;
       const insetRight = (1 - (crop ?? DEFAULT_IMAGE_CROP).right) * 100;
       const insetBottom = (1 - (crop ?? DEFAULT_IMAGE_CROP).bottom) * 100;
       const insetLeft = (crop ?? DEFAULT_IMAGE_CROP).left * 100;
+
       return {
         position: 'absolute',
         left: `${activeCropViewportRect!.left}px`,
@@ -1190,30 +1120,33 @@ useEffect(() => {
         height: `${activeCropViewportRect!.height}px`,
         objectFit: 'contain',
         clipPath: `inset(${insetTop}% ${insetRight}% ${insetBottom}% ${insetLeft}%)`,
-        transform: `rotate(${img.rotation}deg) scaleX(${flipX}) scaleY(${flipY})`,
+        transform: `rotate(${img.rotation}deg)`,
         transformOrigin: 'center center',
         display: 'block',
       };
     }
+
     if (!crop) {
       return {
         width: '100%',
         height: '100%',
         objectFit: 'contain',
-        transform: `rotate(${img.rotation}deg) scaleX(${flipX}) scaleY(${flipY})`,
+        transform: `rotate(${img.rotation}deg)`,
         display: 'block',
       };
     }
+
     const insetTop = crop.top * 100;
     const insetRight = (1 - crop.right) * 100;
     const insetBottom = (1 - crop.bottom) * 100;
     const insetLeft = crop.left * 100;
+
     return {
       width: '100%',
       height: '100%',
       objectFit: 'contain',
       clipPath: `inset(${insetTop}% ${insetRight}% ${insetBottom}% ${insetLeft}%)`,
-      transform: `rotate(${img.rotation}deg) scaleX(${flipX}) scaleY(${flipY})`,
+      transform: `rotate(${img.rotation}deg)`,
       transformOrigin: 'center center',
       display: 'block',
     };
@@ -3053,7 +2986,7 @@ ${doctor} 先生
                             {(() => {
                               const crop = getImageCrop(img) ?? DEFAULT_IMAGE_CROP;
                               const cropPixels = activeCropViewportRect && activeCropImageId === img.id
-                                ? cropToPixels(crop, activeCropViewportRect, img.rotation, img.flipX, img.flipY)
+                                ? cropToPixels(crop, activeCropViewportRect, img.rotation)
                                 : null;
                               return (
                                 <div
@@ -3108,14 +3041,15 @@ ${doctor} 先生
                       </div>
 
                       <div className="w-[220px] flex-shrink-0">
-                        {/* 3列グリッドラッパー */}
-                        <div className="grid grid-cols-3 gap-2 items-start w-full">
-                          {/* 左列 */}
-                          <div className="flex flex-col gap-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* 左列：操作系 */}
+                          <div className="flex flex-col gap-2 w-full">
+                            {/* 1段目: 回転ボタン2つ横並び */}
                             <div className="flex gap-2 w-full">
                               <button
                                 onClick={() => rotateImage(img.id, "left")}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                                style={{ maxWidth: '50%' }}
                                 disabled={activeCropImageId === img.id}
                               >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3125,6 +3059,7 @@ ${doctor} 先生
                               <button
                                 onClick={() => rotateImage(img.id, 'right')}
                                 className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
+                                style={{ maxWidth: '50%' }}
                                 disabled={activeCropImageId === img.id}
                               >
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3132,35 +3067,15 @@ ${doctor} 先生
                                 </svg>
                               </button>
                             </div>
-                            <div className="flex gap-2 w-full">
-                              <button
-                                onClick={() => flipImageX(img.id)}
-                                className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                                disabled={activeCropImageId === img.id}
-                              >
-                                {/* 左右反転アイコン */}
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 12h16M10 16l-4-4 4-4" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={() => flipImageY(img.id)}
-                                className="w-full h-12 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
-                                disabled={activeCropImageId === img.id}
-                              >
-                                {/* 上下反転アイコン */}
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16M16 10l-4-4-4 4" />
-                                </svg>
-                              </button>
-                            </div>
+                            {/* 2段目: 向きを確定・削除ボタン */}
                             <button
                               onClick={async () => {
-                                // ...existing code...
+                                // 向きを確定: canvasで回転を焼き込み
                                 const image = new window.Image();
                                 image.src = img.dataUrl;
                                 await new Promise(resolve => { image.onload = resolve; });
                                 const canvas = document.createElement('canvas');
+                                // 回転後のサイズ計算
                                 let w = img.width;
                                 let h = img.height;
                                 let deg = img.rotation;
@@ -3173,26 +3088,20 @@ ${doctor} 先生
                                 const ctx = canvas.getContext('2d');
                                 if (!ctx) return;
                                 ctx.save();
+                                // 回転中心をcanvas中央に
                                 ctx.translate(w / 2, h / 2);
                                 ctx.rotate((deg * Math.PI) / 180);
-                                // 反転も必ず焼き込む
-                                ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
-                                ctx.drawImage(image, -img.width / 2, -img.height / 2, img.width, img.height);
+                                // 回転後の描画位置
+                                if (deg === 90 || deg === 270) {
+                                  ctx.drawImage(image, -h / 2, -w / 2, h, w);
+                                } else {
+                                  ctx.drawImage(image, -w / 2, -h / 2, w, h);
+                                }
                                 ctx.restore();
                                 const newDataUrl = canvas.toDataURL();
                                 setImages((prev: ImageData[]) => prev.map(i =>
                                   i.id === img.id
-                                    ? {
-                                        ...i,
-                                        dataUrl: newDataUrl,
-                                        originalDataUrl: newDataUrl, // 段落確定時も反転見た目を保持
-                                        width: w,
-                                        height: h,
-                                        rotation: 0,
-                                        flipX: false,
-                                        flipY: false,
-                                        crop: i.crop // cropは維持
-                                      }
+                                    ? { ...i, dataUrl: newDataUrl, width: w, height: h, rotation: 0, crop: DEFAULT_IMAGE_CROP }
                                     : i
                                 ));
                               }}
@@ -3202,9 +3111,6 @@ ${doctor} 先生
                             >
                               向きを確定
                             </button>
-                          </div>
-                          {/* 中央列 */}
-                          <div className="flex flex-col gap-2">
                             <button
                               onClick={() => removeImage(img.id)}
                               className="w-full h-12 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200 transition-all shadow-sm flex items-center justify-center active:scale-95"
@@ -3213,26 +3119,21 @@ ${doctor} 先生
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
                             </button>
-                            {(() => {
-                              return (
-                                <button
-                                  onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
-                                  className={`h-10 w-full rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
-                                    activeCropImageId === img.id
-                                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                  }`}
-                                  disabled={
-                                    (img.rotation ?? 0) !== 0 || img.flipX || img.flipY
-                                  }
-                                >
-                                  {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
-                                </button>
-                              );
-                            })()}
-                            <div style={{ minHeight: 44 }} className="w-full flex items-center justify-center">
-                              {activeCropImageId === img.id ? (
-                                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5 w-full">
+                            {/* 3段目: トリミングボタンとリセット */}
+                            <div className="flex flex-col gap-1 w-full">
+                              <button
+                                onClick={() => setActiveCropImageId((prev) => (prev === img.id ? null : img.id))}
+                                className={`h-10 w-full rounded-lg border text-sm font-semibold transition-all shadow-sm active:scale-95 ${
+                                  activeCropImageId === img.id
+                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                                }`}
+                                disabled={img.rotation !== 0}
+                              >
+                                {activeCropImageId === img.id ? 'トリミング中' : 'トリミング'}
+                              </button>
+                              {activeCropImageId === img.id && (
+                                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
                                   <button
                                     onClick={() => {
                                       recordHistory();
@@ -3244,13 +3145,11 @@ ${doctor} 先生
                                     リセット
                                   </button>
                                 </div>
-                              ) : (
-                                <div className="invisible w-full" style={{ height: 44 }} />
                               )}
                             </div>
                           </div>
                           {/* 右列：数字ボタン */}
-                          <div className="flex flex-col justify-between items-stretch" style={{ minHeight: 'calc(100% - 4px)', gap: '10px', height: '100%' }}>
+                          <div className="flex flex-col gap-1.5 justify-between min-h-[180px] items-stretch">
                             {[1, 2, 3, 4].map(num => (
                               <button
                                 key={num}
@@ -3258,7 +3157,6 @@ ${doctor} 先生
                                   // crop情報があればcanvasで切り抜き
                                   const crop = getImageCrop(img);
                                   if (crop) {
-                                    // 最新のimg情報を必ず参照
                                     const imageEl = new window.Image();
                                     imageEl.src = img.dataUrl;
                                     await new Promise((res, rej) => { imageEl.onload = res; imageEl.onerror = rej; });
@@ -3271,22 +3169,7 @@ ${doctor} 先生
                                     canvas.height = sh;
                                     const ctx = canvas.getContext('2d');
                                     if (ctx) {
-                                      ctx.save();
-                                      ctx.translate(canvas.width / 2, canvas.height / 2);
-                                      ctx.rotate(((img.rotation ?? 0) * Math.PI) / 180);
-                                      ctx.scale(img.flipX ? -1 : 1, img.flipY ? -1 : 1);
-                                      ctx.drawImage(
-                                        imageEl,
-                                        sx,
-                                        sy,
-                                        sw,
-                                        sh,
-                                        -sw / 2,
-                                        -sh / 2,
-                                        sw,
-                                        sh
-                                      );
-                                      ctx.restore();
+                                      ctx.drawImage(imageEl, sx, sy, sw, sh, 0, 0, sw, sh);
                                       const croppedDataUrl = canvas.toDataURL();
                                       setImages((prev: ImageData[]) => prev.map(i =>
                                         i.id === img.id ? { ...i, dataUrl: croppedDataUrl, crop: undefined } : i
@@ -3304,11 +3187,10 @@ ${doctor} 先生
                                     if (currentPage === 3) setPage3Confirmed(true);
                                   }
                                 }}
-                                className={`rounded-lg text-lg font-semibold transition-all shadow-sm active:scale-95 border ${img.row === num
+                                className={`h-12 rounded-lg text-lg font-semibold transition-all shadow-sm active:scale-95 border ${img.row === num
                                     ? 'bg-orange-500 text-white border-orange-400 shadow font-bold'
                                     : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
                                   }`}
-                                style={{ height: '44px', minHeight: '40px', padding: '0' }}
                               >
                                 {num}
                               </button>
