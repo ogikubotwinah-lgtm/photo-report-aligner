@@ -339,7 +339,7 @@ function getInitialReportFields() {
     firstVisitDate: '',
     sedationDate: '',
     anesthesiaDate: '',
-    attendingVet: '',
+    attendingVet: '町田健吾',
     initialText: '',
     procedureText: '',
     postText: '',
@@ -501,6 +501,7 @@ const App: React.FC = () => {
   const [isPostPlacementDropdownOpen, setIsPostPlacementDropdownOpen] = useState(false);
   const thankYouTextTypeDropdownRef = useRef<HTMLDivElement | null>(null);
   const pageSwitcherRef = useRef<HTMLDivElement | null>(null);
+  const imageToolbarRef = useRef<HTMLDivElement | null>(null);
   const [isThankYouTextTypeDropdownOpen, setIsThankYouTextTypeDropdownOpen] = useState(false);
   const [dropdownHighlight, setDropdownHighlight] = useState(-1);
   const shouldOpenAttendingVetOnFocusRef = useRef(false);
@@ -1254,17 +1255,7 @@ useEffect(() => {
 
 
 
-  // 確定後に RowBoard へスクロール（段落ドラッグ移動エリアの見出しが見やすい位置）
-  useEffect(() => {
-    if (page1Confirmed || page2Confirmed || page3Confirmed) {
-      requestAnimationFrame(() => {
-        const el = rowBoardRef.current;
-        if (!el) return;
-        const top = el.getBoundingClientRect().top + window.scrollY - 140;
-        window.scrollTo({ top, behavior: 'smooth' });
-      });
-    }
-  }, [page1Confirmed, page2Confirmed, page3Confirmed]);
+  // 第3段階スクロール（段落ドラッグ移動エリアへの自動スクロール）は無効化済み
 
   const unassignedImages = useMemo(() => images.filter(img => img.row === 0), [images]);
 
@@ -2026,7 +2017,15 @@ ${doctor} 先生
   const focusAndScroll = useCallback((el: HTMLElement | null) => {
     if (!el) return;
     el.focus();
-    el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      const vh = window.innerHeight;
+      // 要素が画面の安全範囲（上120px〜下から200px）内なら何もしない
+      if (rect.top >= 120 && rect.bottom <= vh - 200) return;
+      // 安全範囲外なら、要素が画面の約35%位置に来るようスクロール
+      const targetY = rect.top + window.scrollY - vh * 0.35;
+      window.scrollTo({ top: Math.max(0, targetY), behavior: 'smooth' });
+    });
   }, []);
 
   const focusNextAfterRefHospitalSelection = useCallback((hospitalName: string) => {
@@ -2370,12 +2369,13 @@ ${doctor} 先生
                         }}
                         onClick={() => { setIsAttendingVetDropdownOpen(v => !v); setDropdownHighlight(-1); }}
                         onKeyDown={isAttendingVetDropdownOpen ? (e) => {
-                          const items = ['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
+                          const items = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
                           handleDropdownKeyDown(e, items.length, (idx) => {
                             const name = items[idx];
                             setReportFields(v => ({ ...v, attendingVet: name }));
                             setIsAttendingVetDropdownOpen(false);
-                            if (name) requestAnimationFrame(() => openCalendar('firstVisitDate'));
+                            (document.activeElement as HTMLElement | null)?.blur();
+                            requestAnimationFrame(() => openCalendar('firstVisitDate'));
                           }, () => setIsAttendingVetDropdownOpen(false));
                         } : undefined}
                       >
@@ -2388,8 +2388,8 @@ ${doctor} 先生
                           role="listbox"
                           className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
                         >
-                          {['', '町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
-                            const label = name || '選択してください';
+                          {['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
+                            const label = name;
                             const isSelected = reportFields.attendingVet === name;
                             const isHighlighted = dropdownHighlight === idx;
                             return (
@@ -2857,8 +2857,8 @@ ${doctor} 先生
                   onKeyDown={(e) => {
                     if (e.key === 'Tab' && !e.shiftKey && !showPage3) {
                       setTimeout(() => {
-                        if (pageSwitcherRef.current) {
-                          const top = pageSwitcherRef.current.getBoundingClientRect().top + window.scrollY - 80;
+                        if (imageToolbarRef.current) {
+                          const top = imageToolbarRef.current.getBoundingClientRect().top + window.scrollY - 60;
                           window.scrollTo({ top, behavior: 'smooth' });
                         }
                       }, 30);
@@ -2891,8 +2891,8 @@ ${doctor} 先生
                         setIsThankYouTextTypeDropdownOpen(false);
                       }, () => setIsThankYouTextTypeDropdownOpen(false),
                       () => {
-                        if (pageSwitcherRef.current) {
-                          const top = pageSwitcherRef.current.getBoundingClientRect().top + window.scrollY - 80;
+                        if (imageToolbarRef.current) {
+                          const top = imageToolbarRef.current.getBoundingClientRect().top + window.scrollY - 60;
                           window.scrollTo({ top, behavior: 'smooth' });
                         }
                       });
@@ -2966,8 +2966,8 @@ ${doctor} 先生
                     onKeyDown={(e) => {
                       if (e.key === 'Tab' && !e.shiftKey) {
                         setTimeout(() => {
-                          if (pageSwitcherRef.current) {
-                            const top = pageSwitcherRef.current.getBoundingClientRect().top + window.scrollY - 80;
+                          if (imageToolbarRef.current) {
+                            const top = imageToolbarRef.current.getBoundingClientRect().top + window.scrollY - 60;
                             window.scrollTo({ top, behavior: 'smooth' });
                           }
                         }, 30);
@@ -3066,7 +3066,7 @@ ${doctor} 先生
         </div>
 
         {/* 操作バー：ページ選択・画像追加 */}
-        <div className="lg:col-span-12 relative w-full my-4 h-[48px]">
+        <div ref={imageToolbarRef} className="lg:col-span-12 relative w-full my-4 h-[48px]">
           <div className="absolute right-0 top-0 z-10">
             <button
               onClick={() => {
