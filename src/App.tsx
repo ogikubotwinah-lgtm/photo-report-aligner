@@ -801,6 +801,7 @@ const App: React.FC = () => {
   const [pptxStatus, setPptxStatus] = useState<string>('');
   const [isSavingPptx, setIsSavingPptx] = useState(false);
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
+  const [isSendingGmail, setIsSendingGmail] = useState(false);
   const [isPrintMode, setIsPrintMode] = useState(false);
 
   // テンプレ挿入の undo 用（直前の挿入を1回だけ戻す）
@@ -1714,6 +1715,100 @@ ${doctor} 先生
       setIsCreatingDraft(false);
     }
   }, [isCreatingDraft, reportFields, outputPages]);
+
+  const sendGmail = useCallback(async () => {
+    if (isSendingGmail) return;
+
+    const to = (reportFields.refHospitalEmail || '').trim();
+    if (!to) {
+      window.alert('紹介病院メールが未入力です。メールアドレスを入力してください。');
+      return;
+    }
+
+    if (!window.confirm(`${to} にメールを送信します。よろしいですか？`)) return;
+
+    const owner = (reportFields.ownerLastName || '').trim();
+    const pet = (reportFields.petName || '').trim();
+    const hospital = (reportFields.refHospitalName || reportFields.refHospital || '').trim();
+    const doctor = (reportFields.refDoctor || '').trim();
+    const vet = (reportFields.attendingVet || '').trim();
+
+    const subject = `治療報告書（${owner}様 ${pet}ちゃん）`;
+    const body = `${hospital} 御中
+${doctor} 先生
+
+いつもお世話になっております。荻窪ツイン動物病院の${vet}です。
+添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+
+---
+荻窪ツイン動物病院
+（住所などは今は不要。後で追加）`;
+
+    setIsSendingGmail(true);
+    try {
+      setIsPrintMode(true);
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+      for (let index = 0; index < outputPages.length; index += 1) {
+        const pageNum = outputPages[index];
+        const printPage = document.getElementById(`print-page-${pageNum}`);
+        if (!printPage) {
+          window.alert(`印刷対象プレビューが見つかりません（PAGE ${pageNum}）。`);
+          return;
+        }
+
+        const canvas = await html2canvas(printPage, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+        });
+
+        const imageData = canvas.toDataURL('image/png');
+        if (index > 0) {
+          pdf.addPage('a4', 'portrait');
+        }
+        pdf.addImage(imageData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
+      }
+
+      const pdfBlob = pdf.output('blob');
+
+      const formData = new FormData();
+      formData.append('to', to);
+      formData.append('subject', subject);
+      formData.append('body', body);
+      formData.append('file', new File([pdfBlob], 'Photo_Report_A4.pdf', { type: 'application/pdf' }));
+
+      const response = await fetch(`${SERVER_BASE_URL}/api/gmail/send`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        let detail = data?.error || `HTTP ${response.status}`;
+        if (response.status >= 500) {
+          detail = `${detail}\nサーバ起動状態またはGmail OAuth設定を確認してください。`;
+        }
+        throw new Error(detail);
+      }
+
+      window.alert('メールを送信しました。');
+    } catch (error) {
+      console.error('Gmail send failed:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+        window.alert('Gmail送信に失敗しました: サーバに接続できませんでした。photo-report-server が起動しているか確認してください。');
+      } else {
+        window.alert(`Gmail送信に失敗しました: ${message}`);
+      }
+    } finally {
+      setIsPrintMode(false);
+      setIsSendingGmail(false);
+    }
+  }, [isSendingGmail, reportFields, outputPages]);
 
   const downloadPptx = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -3595,6 +3690,12 @@ ${doctor} 先生
           title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
           className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isCreatingDraft ? "作成中…" : "PDF / Gmail"}
+        </button>
+        <button onClick={sendGmail}
+          disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
+          title="PDFを添付してGmailで即時送信します"
+          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          {isSendingGmail ? "送信中…" : "Gmail送信"}
         </button>
         <button onClick={printPdf}
           title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
