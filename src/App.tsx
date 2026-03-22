@@ -610,6 +610,9 @@ const App: React.FC = () => {
   const [reportCases, setReportCases] = useState<any[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [selectedCaseStatus, setSelectedCaseStatus] = useState<string>('');
+  const [caseFileStatus, setCaseFileStatus] = useState<{ hasDraft: boolean; draftUpdatedAt?: string | null; hasCompletedPdf: boolean; completedPdfFilename?: string | null }>({ hasDraft: false, hasCompletedPdf: false });
+  const [casePdfMap, setCasePdfMap] = useState<Record<string, boolean>>({});
+  const [caseDraftMap, setCaseDraftMap] = useState<Record<string, boolean>>({});
   const [caseStatusFilter, setCaseStatusFilter] = useState('未処理');
   const [caseSearchText, setCaseSearchText] = useState('');
   const [showOnlyDelayedCases, setShowOnlyDelayedCases] = useState(false);
@@ -620,6 +623,23 @@ const App: React.FC = () => {
       .then(data => setReportCases(data))
       .catch(err => console.error('[report-cases]', err));
   }, []);
+
+  useEffect(() => {
+    fetch('http://localhost:8787/api/case-files/map')
+      .then(r => r.ok ? r.json() : { caseFileMap: {} })
+      .then(d => {
+        const m = d.caseFileMap || {};
+        const pdf: Record<string, boolean> = {};
+        const draft: Record<string, boolean> = {};
+        for (const [id, v] of Object.entries(m) as [string, any][]) {
+          pdf[id] = v?.hasCompletedPdf === true;
+          draft[id] = v?.hasDraft === true;
+        }
+        setCasePdfMap(pdf);
+        setCaseDraftMap(draft);
+      })
+      .catch(() => { setCasePdfMap({}); setCaseDraftMap({}); });
+  }, [reportCases]);
 
   const handleSelectCase = useCallback(async (c: any) => {
     setSelectedCaseId(c.case_id);
@@ -635,7 +655,7 @@ const App: React.FC = () => {
       refDoctor: c.referring_doctor_name || '',
     }));
 
-    // 下書き復元
+    // 下書き復元（DB由来）
     try {
       const res = await fetch(`http://localhost:8787/api/report-drafts/${c.case_id}`);
       if (res.ok) {
@@ -649,6 +669,87 @@ const App: React.FC = () => {
       }
     } catch (e) {
       console.log('[draft] load error', e);
+    }
+
+    // draft.json 復元（ファイル由来 — DB由来より優先）
+    try {
+      const draftRes = await fetch(`http://localhost:8787/api/draft-state/${c.case_id}`);
+      if (draftRes.ok) {
+        const draft = await draftRes.json();
+        if (draft?.reportFields && typeof draft.reportFields === 'object') {
+          setRefHospitalInput(draft.reportFields.refHospitalName || draft.reportFields.refHospital || c.referring_hospital || '');
+          setReportFields((prev) => ({ ...prev, ...draft.reportFields }));
+        }
+        if (typeof draft.showPage3 === 'boolean') {
+          setShowPage3(draft.showPage3);
+        }
+
+        // 画像復元
+        if (draft?.pages && typeof draft.pages === 'object') {
+          const restored: Record<number, ImageData[]> = { 1: [], 2: [], 3: [] };
+          for (const [pageKey, metas] of Object.entries(draft.pages)) {
+            const pageNum = Number(pageKey);
+            if (![1, 2, 3].includes(pageNum) || !Array.isArray(metas)) continue;
+            const imagePromises = (metas as any[]).map(async (meta) => {
+              try {
+                const imgRes = await fetch(`http://localhost:8787/api/draft-images/${c.case_id}/${encodeURIComponent(meta.filename)}`);
+                if (!imgRes.ok) return null;
+                const blob = await imgRes.blob();
+                const dataUrl = await new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.readAsDataURL(blob);
+                });
+                const dims = await new Promise<{ w: number; h: number }>((resolve) => {
+                  const img = new Image();
+                  img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+                  img.onerror = () => resolve({ w: meta.width || 800, h: meta.height || 600 });
+                  img.src = dataUrl;
+                });
+                return {
+                  id: meta.id || Math.random().toString(36).substr(2, 9),
+                  name: meta.filename || '',
+                  dataUrl,
+                  width: meta.width || dims.w,
+                  height: meta.height || dims.h,
+                  mimeType: blob.type || 'image/jpeg',
+                  row: meta.row ?? 0,
+                  orderConfirmed: meta.orderConfirmed ?? false,
+                  rotation: meta.rotation ?? 0,
+                  crop: meta.crop || undefined,
+                  flipX: meta.flipX ?? false,
+                  flipY: meta.flipY ?? false,
+                  originalDataUrl: dataUrl,
+                  originalWidth: dims.w,
+                  originalHeight: dims.h,
+                } as ImageData;
+              } catch (e) {
+                console.log(`[draft-images] failed to load ${meta.filename}`, e);
+                return null;
+              }
+            });
+            const results = await Promise.all(imagePromises);
+            restored[pageNum] = results.filter((r): r is ImageData => r !== null);
+          }
+          if (Object.values(restored).some(arr => arr.length > 0)) {
+            setAllPagesImages(restored);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[draft-state] load error', e);
+    }
+
+    // ファイル存在状況を取得
+    try {
+      const fsRes = await fetch(`http://localhost:8787/api/case-files/${c.case_id}/status`);
+      if (fsRes.ok) {
+        setCaseFileStatus(await fsRes.json());
+      } else {
+        setCaseFileStatus({ hasDraft: false, hasCompletedPdf: false });
+      }
+    } catch {
+      setCaseFileStatus({ hasDraft: false, hasCompletedPdf: false });
     }
   }, []);
 
@@ -873,6 +974,54 @@ const App: React.FC = () => {
         }
       }
 
+      // ドラフト画像をサーバーへ保存（副処理）
+      try {
+        const allImages = Object.values(allPagesImages).flat().filter(img => img.dataUrl);
+        if (allImages.length > 0) {
+          const payload = allImages.map(img => ({
+            filename: img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`,
+            dataUrl: img.originalDataUrl || img.dataUrl,
+          }));
+          await fetch(`http://localhost:8787/api/draft-images/${selectedCaseId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ images: payload }),
+          });
+        }
+      } catch (e) {
+        console.log('[draft images] save failed', e);
+      }
+
+      // ドラフト状態（メタデータ）をサーバーへ保存（副処理）
+      try {
+        const pages: Record<string, any[]> = {};
+        for (const [pageNum, imgs] of Object.entries(allPagesImages)) {
+          pages[pageNum] = (imgs as any[]).map(img => ({
+            id: img.id,
+            filename: img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`,
+            row: img.row,
+            rotation: img.rotation,
+            crop: img.crop || null,
+            flipX: img.flipX || false,
+            flipY: img.flipY || false,
+            orderConfirmed: img.orderConfirmed,
+            width: img.width,
+            height: img.height,
+          }));
+        }
+        await fetch(`http://localhost:8787/api/draft-state/${selectedCaseId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reportFields,
+            showPage3,
+            pages,
+          }),
+        });
+      } catch (e) {
+        console.log('[draft state] save failed', e);
+      }
+
       // 基本情報を report_cases に同期（副処理）
       try {
         const syncRes = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}`, {
@@ -898,7 +1047,7 @@ const App: React.FC = () => {
     } catch {
       alert('下書きの保存に失敗しました');
     }
-  }, [selectedCaseId, selectedCaseStatus, reportFields]);
+  }, [selectedCaseId, selectedCaseStatus, reportFields, allPagesImages, showPage3]);
 
   // --- ステータス更新 ---
   const handleMarkMailSent = useCallback(async () => {
@@ -1858,6 +2007,40 @@ ${svgParts.join('\n')}
 
   window.print();
 
+  // completed PDF保存（失敗しても印刷成功は維持）
+  if (selectedCaseId) {
+    try {
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      for (let index = 0; index < outputPages.length; index += 1) {
+        const printPage = document.getElementById(`print-page-${outputPages[index]}`);
+        if (!printPage) continue;
+        const canvas = await html2canvas(printPage, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+        const imageData = canvas.toDataURL('image/png');
+        if (index > 0) pdf.addPage('a4', 'portrait');
+        pdf.addImage(imageData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
+      }
+      const pdfBlob = pdf.output('blob');
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve) => {
+        reader.onload = () => { resolve((reader.result as string).split(',')[1] || ''); };
+        reader.readAsDataURL(pdfBlob);
+      });
+      let ds = new Date().toISOString().slice(0, 10);
+      const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+      if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+      const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
+      const pet = (reportFields.petName || '').trim() || 'pet';
+      const filename = `${ds}_${owner}_${pet}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+      await fetch(`http://localhost:8787/api/completed-artifacts/${selectedCaseId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, dataBase64: base64, mimeType: 'application/pdf' }),
+      });
+    } catch (e) {
+      console.log('[completed artifact] save failed', e);
+    }
+  }
+
   // 自動ステータス更新（失敗しても印刷成功は維持）
   if (selectedCaseId) {
     try {
@@ -1878,7 +2061,7 @@ ${svgParts.join('\n')}
       console.log('[auto status update] failed', e);
     }
   }
-}, [selectedCaseId]);
+}, [selectedCaseId, outputPages, reportFields]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2067,6 +2250,43 @@ ${svgParts.join('\n')}
 
       window.alert('メールを送信しました。');
 
+      // 成果物保存（失敗しても送信成功は維持）
+      if (selectedCaseId) {
+        try {
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve) => {
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.split(',')[1] || '');
+            };
+            reader.readAsDataURL(pdfBlob);
+          });
+          await fetch(`http://localhost:8787/api/completed-artifacts/${selectedCaseId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: (() => {
+              let ds = new Date().toISOString().slice(0, 10);
+              const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+              if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+              const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
+              const pet = (reportFields.petName || '').trim() || 'pet';
+              return `${ds}_${owner}_${pet}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+            })(), dataBase64: base64, mimeType: 'application/pdf' }),
+          });
+        } catch (e) {
+          console.log('[completed artifact] save failed', e);
+        }
+      }
+
+      // ドラフト削除（失敗しても送信成功は維持）
+      if (selectedCaseId) {
+        try {
+          await fetch(`http://localhost:8787/api/draft-state/${selectedCaseId}`, { method: 'DELETE' });
+        } catch (e) {
+          console.log('[draft cleanup] failed', e);
+        }
+      }
+
       // 自動ステータス更新（失敗しても送信成功は維持）
       if (selectedCaseId) {
         try {
@@ -2216,22 +2436,26 @@ ${svgParts.join('\n')}
       });
 
       const fileName = 'Photo_Report_A4.pptx';
-      const ua = navigator.userAgent;
-      const isIOSSafari = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Mac') && navigator.maxTouchPoints > 1);
+      const pptxBlob = (await pptx.write({ outputType: 'blob' })) as Blob;
 
-      if (isIOSSafari) {
-        const blob = (await pptx.write({ outputType: 'blob' })) as Blob;
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = fileName;
-        link.rel = 'noopener';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-      } else {
-        await pptx.writeFile({ fileName });
+      // ダウンロード
+      const blobUrl = URL.createObjectURL(pptxBlob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+
+      // ドラフト削除（失敗してもPPTX出力成功は維持）
+      if (selectedCaseId) {
+        try {
+          await fetch(`http://localhost:8787/api/draft-state/${selectedCaseId}`, { method: 'DELETE' });
+        } catch (e) {
+          console.log('[draft cleanup] failed', e);
+        }
       }
 
       setPptxStatus('保存しました');
@@ -2694,6 +2918,8 @@ ${svgParts.join('\n')}
                       c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
                       'bg-slate-100 text-slate-500'
                     }`}>{c.status}</span>
+                    {caseDraftMap[c.case_id] && <span title="途中保存があります" className="ml-2 text-xs px-2 py-0.5 rounded-full font-semibold bg-sky-100 text-sky-700">下書きあり</span>}
+                    {casePdfMap[c.case_id] && <span title="クリックでPDFを開く" onClick={(e) => { e.stopPropagation(); window.open(`http://localhost:8787/api/case-files/${c.case_id}/completed-pdf`, '_blank'); }} className="ml-2 text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
                     </>); })()}
                   </div>
                 ))}
@@ -2709,6 +2935,8 @@ ${svgParts.join('\n')}
             {(() => { const sc = reportCases.find(r => r.case_id === selectedCaseId); const days = getDaysElapsed(sc?.registered_at); const delay = getDelayLabel(days); return (
             <span>選択中: <strong>{formatCaseDisplayId(selectedCaseId ?? '')}</strong> / {selectedCaseStatus || '-'} / {formatDateShort(sc?.registered_at || '')} / {days ?? '-'}日 <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${delay.className}`}>{delay.text}</span></span>
             ); })()}
+            {caseFileStatus.hasDraft && <><span className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700">下書きあり</span>{caseFileStatus.draftUpdatedAt && <span className="text-xs text-slate-400">{new Date(caseFileStatus.draftUpdatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}</>}
+            {caseFileStatus.hasCompletedPdf && <><span onClick={() => window.open(`http://localhost:8787/api/case-files/${selectedCaseId}/completed-pdf`, '_blank')} className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>{caseFileStatus.completedPdfFilename && <span className="text-xs text-slate-400">{caseFileStatus.completedPdfFilename}</span>}</>}
             <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
               className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
               メール送信済みにする
