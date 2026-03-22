@@ -71,6 +71,32 @@ type CropPixelRect = {
   bottom: number;
 };
 
+function formatCaseDisplayId(caseId?: string): string {
+  if (!caseId) return '';
+  const parts = caseId.split('-');
+  return parts[parts.length - 1] || caseId;
+}
+
+function formatDateShort(iso: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getDaysElapsed(registeredAt?: string): number | null {
+  if (!registeredAt) return null;
+  const d = new Date(registeredAt);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getDelayLabel(days: number | null): { text: string; className: string } {
+  if (days == null) return { text: '-', className: 'bg-gray-100 text-gray-500' };
+  if (days >= 8) return { text: '遅延', className: 'bg-red-100 text-red-700' };
+  if (days >= 4) return { text: '注意', className: 'bg-yellow-100 text-yellow-700' };
+  return { text: '正常', className: 'bg-green-100 text-green-700' };
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -589,19 +615,11 @@ const App: React.FC = () => {
   const [newCaseOwnerLastName, setNewCaseOwnerLastName] = useState('');
   const [newCasePetName, setNewCasePetName] = useState('');
   const [newCaseAttendingVet, setNewCaseAttendingVet] = useState('町田健吾');
-  const [newCaseRefHospital, setNewCaseRefHospital] = useState('');
-  const [newCaseRefDoctorName, setNewCaseRefDoctorName] = useState('');
   const [isCreatingCase, setIsCreatingCase] = useState(false);
 
   const handleCreateCase = useCallback(async () => {
-    if (
-      !newCaseAttendingVet.trim() ||
-      !newCaseOwnerLastName.trim() ||
-      !newCasePetName.trim() ||
-      !newCaseRefHospital.trim() ||
-      !newCaseRefDoctorName.trim()
-    ) {
-      alert('新規登録に必要な項目を入力してください。');
+    if (!newCaseOwnerLastName.trim() || !newCasePetName.trim()) {
+      alert('飼い主姓とペット名を入力してください。');
       return;
     }
 
@@ -612,11 +630,11 @@ const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          attending_vet: newCaseAttendingVet.trim(),
+          attending_vet: newCaseAttendingVet || '未入力',
           owner_last_name: newCaseOwnerLastName.trim(),
           pet_name: newCasePetName.trim(),
-          referring_hospital: newCaseRefHospital.trim(),
-          referring_doctor_name: newCaseRefDoctorName.trim(),
+          referring_hospital: '未入力',
+          referring_doctor_name: '未入力',
         }),
       });
 
@@ -632,8 +650,6 @@ const App: React.FC = () => {
       setNewCaseOwnerLastName('');
       setNewCasePetName('');
       setNewCaseAttendingVet('町田健吾');
-      setNewCaseRefHospital('');
-      setNewCaseRefDoctorName('');
 
       alert('新規患者を登録しました。');
     } catch (err: any) {
@@ -641,7 +657,7 @@ const App: React.FC = () => {
     } finally {
       setIsCreatingCase(false);
     }
-  }, [newCaseAttendingVet, newCaseOwnerLastName, newCasePetName, newCaseRefHospital, newCaseRefDoctorName, handleSelectCase]);
+  }, [newCaseOwnerLastName, newCasePetName, newCaseAttendingVet, handleSelectCase]);
 
   const normalizedRefHospitalEmails = useMemo(() => {
     const map: Record<string, string> = {};
@@ -797,11 +813,30 @@ const App: React.FC = () => {
         body: JSON.stringify({ draft_data_json: reportFields }),
       });
       if (!res.ok) throw new Error('保存失敗');
+
+      // 未着手 → 報告書作成途中 に自動更新
+      if (selectedCaseId && selectedCaseStatus === '未着手') {
+        try {
+          const patchRes = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: '報告書作成途中' }),
+          });
+          if (patchRes.ok) {
+            const updated = await patchRes.json();
+            setSelectedCaseStatus(updated.status || '');
+            setReportCases(prev => prev.map(c => c.case_id === selectedCaseId ? updated : c));
+          }
+        } catch (e) {
+          console.log('[auto status] update failed', e);
+        }
+      }
+
       alert('下書きを保存しました');
     } catch {
       alert('下書きの保存に失敗しました');
     }
-  }, [selectedCaseId, reportFields]);
+  }, [selectedCaseId, selectedCaseStatus, reportFields]);
 
   // --- ステータス更新 ---
   const handleMarkMailSent = useCallback(async () => {
@@ -2508,13 +2543,15 @@ ${doctor} 先生
         <div className="lg:col-span-12 mb-0">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <div className="font-bold text-sm text-slate-700 mb-2">新規患者登録</div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+            <div className="flex items-center gap-2 text-sm">
               <input value={newCaseOwnerLastName} onChange={(e) => setNewCaseOwnerLastName(e.target.value)} placeholder="飼い主姓" className="border border-slate-200 rounded-lg px-2 py-1.5" />
               <input value={newCasePetName} onChange={(e) => setNewCasePetName(e.target.value)} placeholder="ペット名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-              <input value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} placeholder="担当獣医師" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-              <input value={newCaseRefHospital} onChange={(e) => setNewCaseRefHospital(e.target.value)} placeholder="紹介病院" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-              <input value={newCaseRefDoctorName} onChange={(e) => setNewCaseRefDoctorName(e.target.value)} placeholder="先生名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-              <button type="button" onClick={handleCreateCase} disabled={isCreatingCase} className="px-3 py-1.5 rounded-lg bg-green-600 text-white font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
+              <select value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+                {['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <button type="button" onClick={handleCreateCase} disabled={isCreatingCase} className="px-3 py-1.5 rounded-lg bg-green-600 text-white font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors whitespace-nowrap">
                 {isCreatingCase ? '登録中...' : '新規患者を登録'}
               </button>
             </div>
@@ -2535,14 +2572,19 @@ ${doctor} 先生
                       selectedCaseId === c.case_id ? 'bg-blue-100' : ''
                     }`}
                   >
-                    <span className="text-slate-400 mr-2">{c.case_id}</span>
-                    {c.owner_last_name} / {c.pet_name} / {c.referring_hospital}
+                    {(() => { const days = getDaysElapsed(c.registered_at); const delay = getDelayLabel(days); return (<>
+                    <span className="text-slate-400 mr-2">{formatCaseDisplayId(c.case_id)}</span>
+                    <span className="text-slate-400 mr-2">{formatDateShort(c.registered_at)}</span>
+                    <span className="text-slate-400 mr-3">{days ?? '-'}日</span>
+                    <span className={`mr-3 text-xs px-1.5 py-0.5 rounded-full font-semibold ${delay.className}`}>{delay.text}</span>
+                    {c.owner_last_name} / {c.pet_name} / {c.attending_vet || ''} / {c.referring_hospital}
                     <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full font-semibold ${
                       c.status === 'メール送信済み' ? 'bg-green-100 text-green-700' :
                       c.status === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
                       c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
                       'bg-slate-100 text-slate-500'
                     }`}>{c.status}</span>
+                    </>); })()}
                   </div>
                 ))}
               </div>
@@ -2553,7 +2595,9 @@ ${doctor} 先生
         {/* 選択中の患者情報 */}
         {selectedCaseId && (
           <div className="lg:col-span-12 mb-0 flex items-center gap-3 text-sm text-slate-600">
-            <span>選択中: <strong>{selectedCaseId}</strong> / {selectedCaseStatus || '-'}</span>
+            {(() => { const sc = reportCases.find(r => r.case_id === selectedCaseId); const days = getDaysElapsed(sc?.registered_at); const delay = getDelayLabel(days); return (
+            <span>選択中: <strong>{formatCaseDisplayId(selectedCaseId ?? '')}</strong> / {selectedCaseStatus || '-'} / {formatDateShort(sc?.registered_at || '')} / {days ?? '-'}日 <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${delay.className}`}>{delay.text}</span></span>
+            ); })()}
             <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
               className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
               メール送信済みにする
