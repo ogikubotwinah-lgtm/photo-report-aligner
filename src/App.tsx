@@ -553,7 +553,7 @@ const App: React.FC = () => {
       .catch(err => console.error('[report-cases]', err));
   }, []);
 
-  const handleSelectCase = useCallback((c: any) => {
+  const handleSelectCase = useCallback(async (c: any) => {
     setSelectedCaseId(c.case_id);
     setRefHospitalInput(c.referring_hospital || '');
     setReportFields((prev) => ({
@@ -565,6 +565,22 @@ const App: React.FC = () => {
       refHospital: c.referring_hospital || '',
       refDoctor: c.referring_doctor_name || '',
     }));
+
+    // 下書き復元
+    try {
+      const res = await fetch(`http://localhost:8787/api/report-drafts/${c.case_id}`);
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data?.draft_data_json;
+        const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (d && typeof d === 'object') {
+          setRefHospitalInput(d.refHospitalName || d.refHospital || c.referring_hospital || '');
+          setReportFields((prev) => ({ ...prev, ...d }));
+        }
+      }
+    } catch (e) {
+      console.log('[draft] load error', e);
+    }
   }, []);
 
   // --- 新規患者登録 ---
@@ -765,6 +781,25 @@ const App: React.FC = () => {
     if (!label) return '';
     return `【${label}】`;
   }, [(reportFields as any).page3PhotoLabel]);
+
+  // --- 下書き保存 ---
+  const handleSaveDraft = useCallback(async () => {
+    if (!selectedCaseId) {
+      alert('患者を選択してください');
+      return;
+    }
+    try {
+      const res = await fetch(`http://localhost:8787/api/report-drafts/${selectedCaseId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft_data_json: reportFields }),
+      });
+      if (!res.ok) throw new Error('保存失敗');
+      alert('下書きを保存しました');
+    } catch {
+      alert('下書きの保存に失敗しました');
+    }
+  }, [selectedCaseId, reportFields]);
 
   useEffect(() => {
     const initial = getInitialReportFields();
@@ -3809,6 +3844,10 @@ ${doctor} 先生
         {pptxStatus && <p className="text-base text-slate-600 font-bold mt-1">{pptxStatus}</p>}
       </div>
       <div className="flex flex-wrap gap-3">
+        <button onClick={handleSaveDraft} disabled={!selectedCaseId}
+          className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          下書き保存
+        </button>
         <button onClick={openGmailDraft}
           disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
           title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
