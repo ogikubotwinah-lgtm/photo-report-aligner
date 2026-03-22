@@ -92,7 +92,7 @@ function getDaysElapsed(registeredAt?: string): number | null {
 
 function getDelayLabel(days: number | null): { text: string; className: string } {
   if (days == null) return { text: '-', className: 'bg-gray-100 text-gray-500' };
-  if (days >= 8) return { text: '遅延', className: 'bg-red-100 text-red-700' };
+  if (days >= 7) return { text: '遅延', className: 'bg-red-100 text-red-700' };
   if (days >= 4) return { text: '注意', className: 'bg-yellow-100 text-yellow-700' };
   return { text: '正常', className: 'bg-green-100 text-green-700' };
 }
@@ -589,6 +589,9 @@ const App: React.FC = () => {
   const [reportCases, setReportCases] = useState<any[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [selectedCaseStatus, setSelectedCaseStatus] = useState<string>('');
+  const [caseStatusFilter, setCaseStatusFilter] = useState('すべて');
+  const [caseSearchText, setCaseSearchText] = useState('');
+  const [showOnlyDelayedCases, setShowOnlyDelayedCases] = useState(false);
 
   useEffect(() => {
     fetch('http://localhost:8787/api/report-cases')
@@ -1865,7 +1868,8 @@ ${svgParts.join('\n')}
     const doctor = (reportFields.refDoctor || '').trim();
     const vet = (reportFields.attendingVet || '').trim();
 
-    const subject = `治療報告書（${owner}様 ${pet}ちゃん）`;
+    const namePart = owner && pet ? `${owner}${pet}ちゃん` : pet ? `${pet}ちゃん` : owner || '';
+    const subject = `【治療報告書送付】${namePart}（荻窪ツイン動物病院）`;
     const body = `${hospital} 御中
 ${doctor} 先生
 
@@ -1957,7 +1961,8 @@ ${doctor} 先生
     const doctor = (reportFields.refDoctor || '').trim();
     const vet = (reportFields.attendingVet || '').trim();
 
-    const subject = `治療報告書（${owner}様 ${pet}ちゃん）`;
+    const namePart = owner && pet ? `${owner}${pet}ちゃん` : pet ? `${pet}ちゃん` : owner || '';
+    const subject = `【治療報告書送付】${namePart}（荻窪ツイン動物病院）`;
 
     const selectedCase = reportCases.find(c => c.case_id === selectedCaseId);
     const daysElapsed = getDaysElapsed(selectedCase?.registered_at);
@@ -2598,12 +2603,36 @@ ${doctor} 先生
         </div>
 
         {/* 患者一覧 */}
-        {reportCases.length > 0 && (
+        {reportCases.length > 0 && (() => {
+          const normalizedSearch = caseSearchText.trim().toLowerCase();
+          const filteredCases = reportCases.filter((c: any) => {
+            const statusOk = caseStatusFilter === 'すべて' || c.status === caseStatusFilter;
+            const textTarget = [c.owner_last_name, c.pet_name, c.referring_hospital].filter(Boolean).join(' ').toLowerCase();
+            const searchOk = !normalizedSearch || textTarget.includes(normalizedSearch);
+            const delayOk = !showOnlyDelayedCases || getDelayLabel(getDaysElapsed(c.registered_at)).text === '遅延';
+            return statusOk && searchOk && delayOk;
+          });
+          return (
           <div className="lg:col-span-12 mb-0">
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
               <div className="font-bold text-sm text-slate-700 mb-2">患者一覧（{reportCases.length}件）</div>
+              <div className="mb-3 flex flex-wrap gap-2 items-center">
+                <select value={caseStatusFilter} onChange={(e) => setCaseStatusFilter(e.target.value)} className="border rounded px-2 py-1 text-sm">
+                  <option value="すべて">すべて</option>
+                  <option value="未着手">未着手</option>
+                  <option value="報告書作成途中">報告書作成途中</option>
+                  <option value="メール送信済み">メール送信済み</option>
+                  <option value="印刷郵送済み">印刷郵送済み</option>
+                </select>
+                <input value={caseSearchText} onChange={(e) => setCaseSearchText(e.target.value)} placeholder="飼い主姓 / ペット名 / 紹介病院で検索" className="border rounded px-2 py-1 text-sm min-w-[260px]" />
+                <label className="flex items-center gap-1 text-sm">
+                  <input type="checkbox" checked={showOnlyDelayedCases} onChange={(e) => setShowOnlyDelayedCases(e.target.checked)} />
+                  遅延のみ
+                </label>
+                <span className="text-xs text-gray-500">{filteredCases.length}件表示</span>
+              </div>
               <div className="max-h-40 overflow-y-auto text-sm">
-                {reportCases.map((c: any) => (
+                {filteredCases.map((c: any) => (
                   <div
                     key={c.case_id}
                     onClick={() => handleSelectCase(c)}
@@ -2629,7 +2658,8 @@ ${doctor} 先生
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* 選択中の患者情報 */}
         {selectedCaseId && (
