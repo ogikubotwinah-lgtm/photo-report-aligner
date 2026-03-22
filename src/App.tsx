@@ -1949,6 +1949,27 @@ ${doctor} 先生
       }
 
       window.alert('メールを送信しました。');
+
+      // 自動ステータス更新（失敗しても送信成功は維持）
+      if (selectedCaseId) {
+        try {
+          const statusRes = await fetch(
+            `http://localhost:8787/api/report-cases/${selectedCaseId}/status`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'メール送信済み', mail_sent_at: new Date().toISOString() }),
+            }
+          );
+          if (statusRes.ok) {
+            const updated = await statusRes.json();
+            setSelectedCaseStatus(updated.status || '');
+            setReportCases(prev => prev.map(item => item.case_id === selectedCaseId ? updated : item));
+          }
+        } catch (e) {
+          console.log('[auto status update] failed', e);
+        }
+      }
     } catch (error) {
       console.error('Gmail send failed:', error);
       const message = error instanceof Error ? error.message : String(error);
@@ -1961,7 +1982,7 @@ ${doctor} 先生
       setIsPrintMode(false);
       setIsSendingGmail(false);
     }
-  }, [isSendingGmail, reportFields, outputPages]);
+  }, [isSendingGmail, reportFields, outputPages, selectedCaseId]);
 
   const downloadPptx = async (e: React.MouseEvent) => {
     e.preventDefault();
