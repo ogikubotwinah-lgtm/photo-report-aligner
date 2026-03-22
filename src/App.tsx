@@ -100,6 +100,20 @@ function getDelayLabel(days: number | null): { text: string; className: string }
 const ATTENDING_VET_OPTIONS: string[] = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
 const DELAY_APOLOGY_TEXT = 'ご報告が遅くなりましたことをお詫び申し上げます。';
 
+function buildGmailBody(
+  params: { hospital: string; doctor: string; vet: string; isDelayed: boolean },
+): string {
+  return `${params.hospital} 御中
+${params.doctor} 先生
+
+いつもお世話になっております。荻窪ツイン動物病院の${params.vet}です。
+${params.isDelayed ? DELAY_APOLOGY_TEXT + '\n' : ''}添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+
+---
+荻窪ツイン動物病院
+（住所などは今は不要。後で追加）`;
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -1937,8 +1951,6 @@ ${doctor} 先生
       return;
     }
 
-    if (!window.confirm(`${to} にメールを送信します。よろしいですか？`)) return;
-
     const owner = (reportFields.ownerLastName || '').trim();
     const pet = (reportFields.petName || '').trim();
     const hospital = (reportFields.refHospitalName || reportFields.refHospital || '').trim();
@@ -1951,15 +1963,13 @@ ${doctor} 先生
     const daysElapsed = getDaysElapsed(selectedCase?.registered_at);
     const isDelayed = daysElapsed != null && daysElapsed >= 7;
 
-    const body = `${hospital} 御中
-${doctor} 先生
+    const confirmMessage = isDelayed
+      ? `この内容でメール送信しますか？\n\n宛先:\n${to}\n\n件名:\n${subject}\n\n遅延症例:\nはい\n\n※本文冒頭に\n「${DELAY_APOLOGY_TEXT}」\nを追加して送信します。\n\n添付:\nPDFあり`
+      : `この内容でメール送信しますか？\n\n宛先:\n${to}\n\n件名:\n${subject}\n\n遅延症例:\nいいえ\n\n添付:\nPDFあり`;
 
-いつもお世話になっております。荻窪ツイン動物病院の${vet}です。
-${isDelayed ? DELAY_APOLOGY_TEXT + '\n' : ''}添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+    if (!window.confirm(confirmMessage)) return;
 
----
-荻窪ツイン動物病院
-（住所などは今は不要。後で追加）`;
+    const body = buildGmailBody({ hospital, doctor, vet, isDelayed });
 
     setIsSendingGmail(true);
     try {
