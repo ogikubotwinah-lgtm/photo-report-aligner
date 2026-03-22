@@ -545,6 +545,7 @@ const App: React.FC = () => {
   // --- 患者一覧 ---
   const [reportCases, setReportCases] = useState<any[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [selectedCaseStatus, setSelectedCaseStatus] = useState<string>('');
 
   useEffect(() => {
     fetch('http://localhost:8787/api/report-cases')
@@ -555,6 +556,7 @@ const App: React.FC = () => {
 
   const handleSelectCase = useCallback(async (c: any) => {
     setSelectedCaseId(c.case_id);
+    setSelectedCaseStatus(c.status || '');
     setRefHospitalInput(c.referring_hospital || '');
     setReportFields((prev) => ({
       ...prev,
@@ -800,6 +802,39 @@ const App: React.FC = () => {
       alert('下書きの保存に失敗しました');
     }
   }, [selectedCaseId, reportFields]);
+
+  // --- ステータス更新 ---
+  const handleMarkMailSent = useCallback(async () => {
+    if (!selectedCaseId) { alert('患者を選択してください'); return; }
+    try {
+      const res = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'メール送信済み', mail_sent_at: new Date().toISOString() }),
+      });
+      if (!res.ok) throw new Error('更新失敗');
+      const updated = await res.json();
+      setSelectedCaseStatus(updated.status || '');
+      setReportCases(prev => prev.map(item => item.case_id === selectedCaseId ? updated : item));
+      alert('ステータスをメール送信済みに更新しました');
+    } catch { alert('ステータス更新に失敗しました'); }
+  }, [selectedCaseId]);
+
+  const handleMarkPostalSent = useCallback(async () => {
+    if (!selectedCaseId) { alert('患者を選択してください'); return; }
+    try {
+      const res = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: '印刷郵送済み', postal_sent_at: new Date().toISOString() }),
+      });
+      if (!res.ok) throw new Error('更新失敗');
+      const updated = await res.json();
+      setSelectedCaseStatus(updated.status || '');
+      setReportCases(prev => prev.map(item => item.case_id === selectedCaseId ? updated : item));
+      alert('ステータスを印刷郵送済みに更新しました');
+    } catch { alert('ステータス更新に失敗しました'); }
+  }, [selectedCaseId]);
 
   useEffect(() => {
     const initial = getInitialReportFields();
@@ -2481,11 +2516,31 @@ ${doctor} 先生
                   >
                     <span className="text-slate-400 mr-2">{c.case_id}</span>
                     {c.owner_last_name} / {c.pet_name} / {c.referring_hospital}
-                    <span className="ml-2 text-xs text-slate-400">{c.status}</span>
+                    <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full font-semibold ${
+                      c.status === 'メール送信済み' ? 'bg-green-100 text-green-700' :
+                      c.status === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
+                      c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
+                      'bg-slate-100 text-slate-500'
+                    }`}>{c.status}</span>
                   </div>
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 選択中の患者情報 */}
+        {selectedCaseId && (
+          <div className="lg:col-span-12 mb-0 flex items-center gap-3 text-sm text-slate-600">
+            <span>選択中: <strong>{selectedCaseId}</strong> / {selectedCaseStatus || '-'}</span>
+            <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
+              className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
+              メール送信済みにする
+            </button>
+            <button type="button" onClick={handleMarkPostalSent} disabled={!selectedCaseId}
+              className="px-3 py-1 rounded-lg bg-orange-500 text-white text-xs font-semibold disabled:opacity-50 hover:bg-orange-600 transition-colors">
+              印刷郵送済みにする
+            </button>
           </div>
         )}
 
