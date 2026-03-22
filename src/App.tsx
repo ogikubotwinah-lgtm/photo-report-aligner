@@ -97,6 +97,9 @@ function getDelayLabel(days: number | null): { text: string; className: string }
   return { text: '正常', className: 'bg-green-100 text-green-700' };
 }
 
+const ATTENDING_VET_OPTIONS: string[] = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
+const DELAY_APOLOGY_TEXT = 'ご報告が遅くなりましたことをお詫び申し上げます。';
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -830,6 +833,27 @@ const App: React.FC = () => {
         } catch (e) {
           console.log('[auto status] update failed', e);
         }
+      }
+
+      // 基本情報を report_cases に同期（副処理）
+      try {
+        const syncRes = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            attending_vet: reportFields.attendingVet,
+            owner_last_name: reportFields.ownerLastName,
+            pet_name: reportFields.petName,
+            referring_hospital: reportFields.refHospitalName || reportFields.refHospital,
+            referring_doctor_name: reportFields.refDoctor,
+          }),
+        });
+        if (syncRes.ok) {
+          const updated = await syncRes.json();
+          setReportCases(prev => prev.map(c => c.case_id === selectedCaseId ? updated : c));
+        }
+      } catch (e) {
+        console.log('[case sync] failed', e);
       }
 
       alert('下書きを保存しました');
@@ -1922,11 +1946,16 @@ ${doctor} 先生
     const vet = (reportFields.attendingVet || '').trim();
 
     const subject = `治療報告書（${owner}様 ${pet}ちゃん）`;
+
+    const selectedCase = reportCases.find(c => c.case_id === selectedCaseId);
+    const daysElapsed = getDaysElapsed(selectedCase?.registered_at);
+    const isDelayed = daysElapsed != null && daysElapsed >= 7;
+
     const body = `${hospital} 御中
 ${doctor} 先生
 
 いつもお世話になっております。荻窪ツイン動物病院の${vet}です。
-添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+${isDelayed ? DELAY_APOLOGY_TEXT + '\n' : ''}添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
 
 ---
 荻窪ツイン動物病院
@@ -2547,7 +2576,7 @@ ${doctor} 先生
               <input value={newCaseOwnerLastName} onChange={(e) => setNewCaseOwnerLastName(e.target.value)} placeholder="飼い主姓" className="border border-slate-200 rounded-lg px-2 py-1.5" />
               <input value={newCasePetName} onChange={(e) => setNewCasePetName(e.target.value)} placeholder="ペット名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
               <select value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
-                {['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map(name => (
+                {ATTENDING_VET_OPTIONS.map(name => (
                   <option key={name} value={name}>{name}</option>
                 ))}
               </select>
@@ -2743,7 +2772,7 @@ ${doctor} 先生
                         }}
                         onClick={() => { setIsAttendingVetDropdownOpen(v => !v); setDropdownHighlight(-1); }}
                         onKeyDown={isAttendingVetDropdownOpen ? (e) => {
-                          const items = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
+                          const items = ATTENDING_VET_OPTIONS;
                           handleDropdownKeyDown(e, items.length, (idx) => {
                             const name = items[idx];
                             setReportFields(v => ({ ...v, attendingVet: name }));
@@ -2762,7 +2791,7 @@ ${doctor} 先生
                           role="listbox"
                           className="absolute z-40 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
                         >
-                          {['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'].map((name, idx) => {
+                          {ATTENDING_VET_OPTIONS.map((name, idx) => {
                             const label = name;
                             const isSelected = reportFields.attendingVet === name;
                             const isHighlighted = dropdownHighlight === idx;
