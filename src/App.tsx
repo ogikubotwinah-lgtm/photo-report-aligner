@@ -91,10 +91,8 @@ function getDaysElapsed(registeredAt?: string): number | null {
 }
 
 function getDelayLabel(days: number | null): { text: string; className: string } {
-  if (days == null) return { text: '-', className: 'bg-gray-100 text-gray-500' };
-  if (days >= 7) return { text: '遅延', className: 'bg-red-100 text-red-700' };
-  if (days >= 4) return { text: '注意', className: 'bg-yellow-100 text-yellow-700' };
-  return { text: '正常', className: 'bg-green-100 text-green-700' };
+  if (days != null && days >= 7) return { text: '遅延', className: 'bg-red-100 text-red-700' };
+  return { text: '', className: '' };
 }
 
 const ATTENDING_VET_OPTIONS: string[] = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
@@ -612,7 +610,7 @@ const App: React.FC = () => {
   const [reportCases, setReportCases] = useState<any[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [selectedCaseStatus, setSelectedCaseStatus] = useState<string>('');
-  const [caseStatusFilter, setCaseStatusFilter] = useState('すべて');
+  const [caseStatusFilter, setCaseStatusFilter] = useState('未処理');
   const [caseSearchText, setCaseSearchText] = useState('');
   const [showOnlyDelayedCases, setShowOnlyDelayedCases] = useState(false);
 
@@ -2646,23 +2644,26 @@ ${svgParts.join('\n')}
         {reportCases.length > 0 && (() => {
           const normalizedSearch = caseSearchText.trim().toLowerCase();
           const filteredCases = reportCases.filter((c: any) => {
-            const statusOk = caseStatusFilter === 'すべて' || c.status === caseStatusFilter;
-            const textTarget = [c.owner_last_name, c.pet_name, c.referring_hospital].filter(Boolean).join(' ').toLowerCase();
+            const statusOk = caseStatusFilter === 'すべて'
+              ? true
+              : caseStatusFilter === '未処理'
+                ? (c.status === '未着手' || c.status === '報告書作成途中')
+                : c.status === caseStatusFilter;
+            const textTarget = [c.owner_last_name, c.pet_name, c.referring_hospital, c.attending_vet].filter(Boolean).join(' ').toLowerCase();
             const searchOk = !normalizedSearch || textTarget.includes(normalizedSearch);
             const delayOk = !showOnlyDelayedCases || getDelayLabel(getDaysElapsed(c.registered_at)).text === '遅延';
             return statusOk && searchOk && delayOk;
-          });
+          }).slice(0, 6);
           return (
           <div className="lg:col-span-12 mb-0">
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
               <div className="font-bold text-sm text-slate-700 mb-2">患者一覧（{reportCases.length}件）</div>
               <div className="mb-3 flex flex-wrap gap-2 items-center">
                 <select value={caseStatusFilter} onChange={(e) => setCaseStatusFilter(e.target.value)} className="border rounded px-2 py-1 text-sm">
-                  <option value="すべて">すべて</option>
-                  <option value="未着手">未着手</option>
-                  <option value="報告書作成途中">報告書作成途中</option>
+                  <option value="未処理">未処理</option>
                   <option value="メール送信済み">メール送信済み</option>
                   <option value="印刷郵送済み">印刷郵送済み</option>
+                  <option value="すべて">すべて</option>
                 </select>
                 <input value={caseSearchText} onChange={(e) => setCaseSearchText(e.target.value)} placeholder="飼い主姓 / ペット名 / 紹介病院で検索" className="border rounded px-2 py-1 text-sm min-w-[260px]" />
                 <label className="flex items-center gap-1 text-sm">
@@ -2671,24 +2672,25 @@ ${svgParts.join('\n')}
                 </label>
                 <span className="text-xs text-gray-500">{filteredCases.length}件表示</span>
               </div>
-              <div className="max-h-40 overflow-y-auto text-sm">
+              <div className="max-h-64 overflow-y-auto text-base">
                 {filteredCases.map((c: any) => (
                   <div
                     key={c.case_id}
                     onClick={() => handleSelectCase(c)}
-                    className={`cursor-pointer p-2 border-b border-slate-100 hover:bg-gray-100 ${
-                      selectedCaseId === c.case_id ? 'bg-blue-100' : ''
+                    className={`cursor-pointer px-2 py-3 border-b border-slate-100 ${
+                      selectedCaseId === c.case_id ? 'bg-blue-100 hover:bg-blue-100' :
+                      (getDaysElapsed(c.registered_at) ?? 0) >= 7 ? 'bg-red-50 hover:bg-red-100' :
+                      'hover:bg-gray-100'
                     }`}
                   >
-                    {(() => { const days = getDaysElapsed(c.registered_at); const delay = getDelayLabel(days); return (<>
+                    {(() => { const days = getDaysElapsed(c.registered_at); return (<>
                     <span className="text-slate-400 mr-2">{formatCaseDisplayId(c.case_id)}</span>
                     <span className="text-slate-400 mr-2">{formatDateShort(c.registered_at)}</span>
                     <span className="text-slate-400 mr-3">{days ?? '-'}日</span>
-                    <span className={`mr-3 text-xs px-1.5 py-0.5 rounded-full font-semibold ${delay.className}`}>{delay.text}</span>
-                    {c.owner_last_name} / {c.pet_name} / {c.attending_vet || ''} / {c.referring_hospital}
+                    {c.owner_last_name}{c.pet_name ? `${c.pet_name}ちゃん` : ''} / {c.attending_vet || ''} / {c.referring_hospital}
                     <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full font-semibold ${
-                      c.status === 'メール送信済み' ? 'bg-green-100 text-green-700' :
-                      c.status === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
+                      c.status === 'メール送信済み' ? 'bg-emerald-100 text-emerald-700' :
+                      c.status === '印刷郵送済み' ? 'bg-amber-100 text-amber-700' :
                       c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
                       'bg-slate-100 text-slate-500'
                     }`}>{c.status}</span>
@@ -2721,12 +2723,8 @@ ${svgParts.join('\n')}
         {/* 報告書データ入力フォーム */}
         <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5 space-y-4" onKeyDown={handleEnterFocusNextInput}>
           <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200">
-  <div className="flex items-center gap-3">
+  <div>
     <h3 className="text-lg font-semibold text-slate-800 tracking-tight">報告書データ入力</h3>
-    <button onClick={handleSaveDraft} disabled={!selectedCaseId}
-      className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1 rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-      保存
-    </button>
   </div>
   <div className="flex items-center gap-3">
     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest whitespace-nowrap">報告日</label>
@@ -4077,26 +4075,30 @@ ${svgParts.join('\n')}
         {pptxStatus && <p className="text-base text-slate-600 font-bold mt-1">{pptxStatus}</p>}
       </div>
       <div className="flex flex-wrap gap-3">
-        <button onClick={sendGmail}
-          disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
-          title="PDFを添付してGmailで即時送信します"
-          className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-          {isSendingGmail ? "送信中…" : "Gmail送信"}
-        </button>
         <button onClick={openGmailDraft}
           disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
           title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
-          className="bg-blue-100 text-blue-700 border border-blue-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isCreatingDraft ? "作成中…" : "Gmail下書き"}
+        </button>
+        <button onClick={sendGmail}
+          disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
+          title="PDFを添付してGmailで即時送信します"
+          className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          {isSendingGmail ? "送信中…" : "Gmail送信"}
         </button>
         <button onClick={printPdf}
           title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
-          className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm flex items-center gap-2">
+          className="bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm flex items-center gap-2">
           PDF印刷
         </button>
         <button onClick={downloadPptx} disabled={isSavingPptx}
-          className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          className="bg-violet-500 hover:bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
           {isSavingPptx ? '保存中…' : 'PPTX出力'}
+        </button>
+        <button onClick={handleSaveDraft} disabled={!selectedCaseId}
+          className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          入力内容を保存
         </button>
       </div>
       </div>
