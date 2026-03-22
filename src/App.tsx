@@ -542,6 +542,89 @@ const App: React.FC = () => {
       });
   }, []);
 
+  // --- 患者一覧 ---
+  const [reportCases, setReportCases] = useState<any[]>([]);
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('http://localhost:8787/api/report-cases')
+      .then(res => res.json())
+      .then(data => setReportCases(data))
+      .catch(err => console.error('[report-cases]', err));
+  }, []);
+
+  const handleSelectCase = useCallback((c: any) => {
+    setSelectedCaseId(c.case_id);
+    setRefHospitalInput(c.referring_hospital || '');
+    setReportFields((prev) => ({
+      ...prev,
+      ownerLastName: c.owner_last_name || '',
+      petName: c.pet_name || '',
+      attendingVet: c.attending_vet || '',
+      refHospitalName: c.referring_hospital || '',
+      refHospital: c.referring_hospital || '',
+      refDoctor: c.referring_doctor_name || '',
+    }));
+  }, []);
+
+  // --- 新規患者登録 ---
+  const [newCaseOwnerLastName, setNewCaseOwnerLastName] = useState('');
+  const [newCasePetName, setNewCasePetName] = useState('');
+  const [newCaseAttendingVet, setNewCaseAttendingVet] = useState('町田健吾');
+  const [newCaseRefHospital, setNewCaseRefHospital] = useState('');
+  const [newCaseRefDoctorName, setNewCaseRefDoctorName] = useState('');
+  const [isCreatingCase, setIsCreatingCase] = useState(false);
+
+  const handleCreateCase = useCallback(async () => {
+    if (
+      !newCaseAttendingVet.trim() ||
+      !newCaseOwnerLastName.trim() ||
+      !newCasePetName.trim() ||
+      !newCaseRefHospital.trim() ||
+      !newCaseRefDoctorName.trim()
+    ) {
+      alert('新規登録に必要な項目を入力してください。');
+      return;
+    }
+
+    try {
+      setIsCreatingCase(true);
+
+      const res = await fetch('http://localhost:8787/api/report-cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attending_vet: newCaseAttendingVet.trim(),
+          owner_last_name: newCaseOwnerLastName.trim(),
+          pet_name: newCasePetName.trim(),
+          referring_hospital: newCaseRefHospital.trim(),
+          referring_doctor_name: newCaseRefDoctorName.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error('新規患者登録に失敗しました。');
+      }
+
+      const created = await res.json();
+
+      setReportCases((prev) => [created, ...prev]);
+      handleSelectCase(created);
+
+      setNewCaseOwnerLastName('');
+      setNewCasePetName('');
+      setNewCaseAttendingVet('町田健吾');
+      setNewCaseRefHospital('');
+      setNewCaseRefDoctorName('');
+
+      alert('新規患者を登録しました。');
+    } catch (err: any) {
+      alert(err?.message || '新規患者登録に失敗しました。');
+    } finally {
+      setIsCreatingCase(false);
+    }
+  }, [newCaseAttendingVet, newCaseOwnerLastName, newCasePetName, newCaseRefHospital, newCaseRefDoctorName, handleSelectCase]);
+
   const normalizedRefHospitalEmails = useMemo(() => {
     const map: Record<string, string> = {};
     Object.entries(suggestions.refHospitalEmails || {}).forEach(([k, v]) => {
@@ -2330,6 +2413,47 @@ ${doctor} 先生
       </nav>
 
       <main className="max-w-7xl mx-auto px-6 mt-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
+        {/* 新規患者登録 */}
+        <div className="lg:col-span-12 mb-0">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+            <div className="font-bold text-sm text-slate-700 mb-2">新規患者登録</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+              <input value={newCaseOwnerLastName} onChange={(e) => setNewCaseOwnerLastName(e.target.value)} placeholder="飼い主姓" className="border border-slate-200 rounded-lg px-2 py-1.5" />
+              <input value={newCasePetName} onChange={(e) => setNewCasePetName(e.target.value)} placeholder="ペット名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
+              <input value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} placeholder="担当獣医師" className="border border-slate-200 rounded-lg px-2 py-1.5" />
+              <input value={newCaseRefHospital} onChange={(e) => setNewCaseRefHospital(e.target.value)} placeholder="紹介病院" className="border border-slate-200 rounded-lg px-2 py-1.5" />
+              <input value={newCaseRefDoctorName} onChange={(e) => setNewCaseRefDoctorName(e.target.value)} placeholder="先生名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
+              <button type="button" onClick={handleCreateCase} disabled={isCreatingCase} className="px-3 py-1.5 rounded-lg bg-green-600 text-white font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
+                {isCreatingCase ? '登録中...' : '新規患者を登録'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* 患者一覧 */}
+        {reportCases.length > 0 && (
+          <div className="lg:col-span-12 mb-0">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
+              <div className="font-bold text-sm text-slate-700 mb-2">患者一覧（{reportCases.length}件）</div>
+              <div className="max-h-40 overflow-y-auto text-sm">
+                {reportCases.map((c: any) => (
+                  <div
+                    key={c.case_id}
+                    onClick={() => handleSelectCase(c)}
+                    className={`cursor-pointer p-2 border-b border-slate-100 hover:bg-gray-100 ${
+                      selectedCaseId === c.case_id ? 'bg-blue-100' : ''
+                    }`}
+                  >
+                    <span className="text-slate-400 mr-2">{c.case_id}</span>
+                    {c.owner_last_name} / {c.pet_name} / {c.referring_hospital}
+                    <span className="ml-2 text-xs text-slate-400">{c.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 報告書データ入力フォーム */}
         <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5 space-y-4" onKeyDown={handleEnterFocusNextInput}>
           <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200">
