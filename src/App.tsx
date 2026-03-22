@@ -98,20 +98,43 @@ function getDelayLabel(days: number | null): { text: string; className: string }
 }
 
 const ATTENDING_VET_OPTIONS: string[] = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
-const DELAY_APOLOGY_TEXT = 'ご報告が遅くなりましたことをお詫び申し上げます。';
+const DELAY_APOLOGY_TEXT = 'ご報告が遅くなり申し訳ございません。';
 
 function buildGmailBody(
-  params: { hospital: string; doctor: string; vet: string; isDelayed: boolean },
+  params: { hospital: string; doctor: string; petName: string; isDelayed: boolean },
 ): string {
-  return `${params.hospital} 御中
-${params.doctor} 先生
+  const addressee = params.doctor
+    ? `${params.hospital}　${params.doctor}先生`
+    : `${params.hospital}　御中`;
 
-いつもお世話になっております。荻窪ツイン動物病院の${params.vet}です。
-${params.isDelayed ? DELAY_APOLOGY_TEXT + '\n' : ''}添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+  const thanksLine = params.petName
+    ? `\nこのたびは、${params.petName}ちゃんをご紹介いただき、誠にありがとうございました。\n`
+    : '\n';
 
----
+  const reportLine = params.petName
+    ? `ご紹介いただきました${params.petName}ちゃんの治療報告書をお送りいたします。`
+    : 'ご紹介いただきました治療報告書をお送りいたします。';
+
+  const delayLine = params.isDelayed ? `\n${DELAY_APOLOGY_TEXT}\n` : '';
+
+  return `${addressee}
+
+大変お世話になっております。
+荻窪ツイン動物病院です。
+${thanksLine}${reportLine}
+${delayLine}
+ご査収のほどよろしくお願い申し上げます。
+
+不明な点などございましたら、メールでお問い合わせ下さい。
+今後とも何卒よろしくお願い申し上げます。
+
+――――――――――――――
 荻窪ツイン動物病院
-（住所などは今は不要。後で追加）`;
+〒167-0043
+東京都杉並区上荻1-23-18
+TEL：03-3220-1122
+MAIL：ogikubotwinah@gmail.com
+――――――――――――――`;
 }
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -1836,7 +1859,28 @@ ${svgParts.join('\n')}
   await new Promise(requestAnimationFrame);
 
   window.print();
-}, []);
+
+  // 自動ステータス更新（失敗しても印刷成功は維持）
+  if (selectedCaseId) {
+    try {
+      const statusRes = await fetch(
+        `http://localhost:8787/api/report-cases/${selectedCaseId}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: '印刷郵送済み', postal_sent_at: new Date().toISOString() }),
+        }
+      );
+      if (statusRes.ok) {
+        const updated = await statusRes.json();
+        setSelectedCaseStatus(updated.status || '');
+        setReportCases(prev => prev.map(item => item.case_id === selectedCaseId ? updated : item));
+      }
+    } catch (e) {
+      console.log('[auto status update] failed', e);
+    }
+  }
+}, [selectedCaseId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1866,19 +1910,15 @@ ${svgParts.join('\n')}
     const pet = (reportFields.petName || '').trim();
     const hospital = (reportFields.refHospitalName || reportFields.refHospital || '').trim();
     const doctor = (reportFields.refDoctor || '').trim();
-    const vet = (reportFields.attendingVet || '').trim();
 
     const namePart = owner && pet ? `${owner}${pet}ちゃん` : pet ? `${pet}ちゃん` : owner || '';
     const subject = `【治療報告書送付】${namePart}（荻窪ツイン動物病院）`;
-    const body = `${hospital} 御中
-${doctor} 先生
 
-いつもお世話になっております。荻窪ツイン動物病院の${vet}です。
-添付の通り、治療報告書をお送りします。ご確認よろしくお願いいたします。
+    const selectedCase = reportCases.find(c => c.case_id === selectedCaseId);
+    const daysElapsed = getDaysElapsed(selectedCase?.registered_at);
+    const isDelayed = daysElapsed != null && daysElapsed >= 7;
 
----
-荻窪ツイン動物病院
-（住所などは今は不要。後で追加）`;
+    const body = buildGmailBody({ hospital, doctor, petName: pet, isDelayed });
 
     setIsCreatingDraft(true);
     try {
@@ -1944,7 +1984,7 @@ ${doctor} 先生
       setIsPrintMode(false);
       setIsCreatingDraft(false);
     }
-  }, [isCreatingDraft, reportFields, outputPages]);
+  }, [isCreatingDraft, reportFields, outputPages, reportCases, selectedCaseId]);
 
   const sendGmail = useCallback(async () => {
     if (isSendingGmail) return;
@@ -1974,7 +2014,7 @@ ${doctor} 先生
 
     if (!window.confirm(confirmMessage)) return;
 
-    const body = buildGmailBody({ hospital, doctor, vet, isDelayed });
+    const body = buildGmailBody({ hospital, doctor, petName: pet, isDelayed });
 
     setIsSendingGmail(true);
     try {
@@ -2681,8 +2721,12 @@ ${doctor} 先生
         {/* 報告書データ入力フォーム */}
         <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5 space-y-4" onKeyDown={handleEnterFocusNextInput}>
           <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200">
-  <div>
+  <div className="flex items-center gap-3">
     <h3 className="text-lg font-semibold text-slate-800 tracking-tight">報告書データ入力</h3>
+    <button onClick={handleSaveDraft} disabled={!selectedCaseId}
+      className="bg-slate-500 hover:bg-slate-600 text-white px-3 py-1 rounded-lg text-xs font-semibold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+      保存
+    </button>
   </div>
   <div className="flex items-center gap-3">
     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest whitespace-nowrap">報告日</label>
@@ -4033,30 +4077,26 @@ ${doctor} 先生
         {pptxStatus && <p className="text-base text-slate-600 font-bold mt-1">{pptxStatus}</p>}
       </div>
       <div className="flex flex-wrap gap-3">
-        <button onClick={handleSaveDraft} disabled={!selectedCaseId}
-          className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-          下書き保存
-        </button>
-        <button onClick={openGmailDraft}
-          disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
-          title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
-          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-          {isCreatingDraft ? "作成中…" : "PDF / Gmail"}
-        </button>
         <button onClick={sendGmail}
           disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
           title="PDFを添付してGmailで即時送信します"
           className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isSendingGmail ? "送信中…" : "Gmail送信"}
         </button>
+        <button onClick={openGmailDraft}
+          disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
+          title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
+          className="bg-blue-100 text-blue-700 border border-blue-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          {isCreatingDraft ? "作成中…" : "Gmail下書き"}
+        </button>
         <button onClick={printPdf}
           title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
           className="bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-orange-400 text-sm flex items-center gap-2">
-          PDF 印刷
+          PDF印刷
         </button>
         <button onClick={downloadPptx} disabled={isSavingPptx}
-          className="bg-slate-100 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-200 flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-          {isSavingPptx ? '保存中…' : 'PPTX出力/編集'}
+          className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          {isSavingPptx ? '保存中…' : 'PPTX出力'}
         </button>
       </div>
       </div>
