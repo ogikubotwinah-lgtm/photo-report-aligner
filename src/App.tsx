@@ -3121,26 +3121,36 @@ ${svgParts.join('\n')}
                   <div
                     key={c.case_id}
                     onClick={() => handleSelectCase(c)}
-                    className={`cursor-pointer px-2 py-3 border-b border-slate-100 ${
-                      selectedCaseId === c.case_id ? 'bg-blue-100 hover:bg-blue-100' :
-                      (getDaysElapsed(c.registered_at) ?? 0) >= 7 ? 'bg-red-50 hover:bg-red-100' :
-                      'hover:bg-gray-100'
+                    className={`cursor-pointer px-3 py-2.5 border-b border-slate-100 transition-colors ${
+                      selectedCaseId === c.case_id ? 'bg-blue-50 hover:bg-blue-50 border-l-4 border-l-blue-500 shadow-sm' :
+                      (getDaysElapsed(c.registered_at) ?? 0) >= 7 ? 'bg-red-50/60 hover:bg-red-100/60 border-l-4 border-l-transparent' :
+                      'hover:bg-gray-50 border-l-4 border-l-transparent'
                     }`}
                   >
-                    {(() => { const days = getDaysElapsed(c.registered_at); return (<>
-                    <span className="text-slate-400 mr-2">{formatCaseDisplayId(c.case_id)}</span>
-                    <span className="text-slate-400 mr-2">{formatDateShort(c.registered_at)}</span>
-                    <span className="text-slate-400 mr-3">{days ?? '-'}日</span>
-                    {c.owner_last_name}{c.pet_name ? `${c.pet_name}ちゃん` : ''} / {c.attending_vet || ''} / {c.referring_hospital}
-                    <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full font-semibold ${
-                      c.status === 'メール送信済み' ? 'bg-emerald-100 text-emerald-700' :
-                      c.status === '印刷郵送済み' ? 'bg-amber-100 text-amber-700' :
-                      c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
-                      'bg-slate-100 text-slate-500'
-                    }`}>{c.status}</span>
-                    {caseDraftMap[c.case_id] && <span title="途中保存があります" className="ml-2 text-xs px-2 py-0.5 rounded-full font-semibold bg-sky-100 text-sky-700">下書きあり</span>}
-                    {casePdfMap[c.case_id] && <span title="クリックでPDFを開く" onClick={(e) => { e.stopPropagation(); window.open(`http://localhost:8787/api/case-files/${c.case_id}/completed-pdf`, '_blank'); }} className="ml-2 text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
-                    </>); })()}
+                    {(() => { const days = getDaysElapsed(c.registered_at); const delay = (days ?? 0) >= 7; const statusLabel = c.status === '報告書作成途中' ? '作成中' : c.status; return (<div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`text-sm font-bold tabular-nums w-8 text-right flex-shrink-0 ${delay ? 'text-red-500' : 'text-slate-400'}`}>{days ?? '-'}日</span>
+                          <span className="text-lg font-bold text-slate-800 truncate">{c.owner_last_name}{c.pet_name ? `${c.pet_name}ちゃん` : ''}</span>
+                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{c.attending_vet || ''}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                          <span className={`text-sm px-2.5 py-0.5 rounded-full font-semibold ${
+                            c.status === 'メール送信済み' ? 'bg-green-100 text-green-700' :
+                            c.status === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
+                            c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{statusLabel}</span>
+                          {casePdfMap[c.case_id] && <span title="クリックでPDFを開く" onClick={(e) => { e.stopPropagation(); window.open(`http://localhost:8787/api/case-files/${c.case_id}/completed-pdf`, '_blank'); }} className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-gray-400 pl-10">
+                        <span>{formatCaseDisplayId(c.case_id)}</span>
+                        <span>{formatDateShort(c.registered_at)}</span>
+                        <span className="text-gray-300">|</span>
+                        <span className="text-gray-500">{c.referring_hospital}</span>
+                      </div>
+                    </div>); })()}
                   </div>
                 ))}
               </div>
@@ -3151,20 +3161,28 @@ ${svgParts.join('\n')}
 
         {/* 選択中の患者情報 */}
         {selectedCaseId && (
-          <div className="lg:col-span-12 mb-0 flex items-center gap-3 text-sm text-slate-600">
-            {(() => { const sc = reportCases.find(r => r.case_id === selectedCaseId); const days = getDaysElapsed(sc?.registered_at); const delay = getDelayLabel(days); return (
-            <span>選択中: <strong>{formatCaseDisplayId(selectedCaseId ?? '')}</strong> / {selectedCaseStatus || '-'} / {formatDateShort(sc?.registered_at || '')} / {days ?? '-'}日 <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${delay.className}`}>{delay.text}</span></span>
-            ); })()}
-            {caseFileStatus.hasDraft && <><span className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700">下書きあり</span>{caseFileStatus.draftUpdatedAt && <span className="text-xs text-slate-400">下書き保存 {new Date(caseFileStatus.draftUpdatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}</>}
-            {caseFileStatus.hasCompletedPdf && <><span onClick={() => window.open(`http://localhost:8787/api/case-files/${selectedCaseId}/completed-pdf`, '_blank')} className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>{caseFileStatus.completedPdfFilename && <span className="text-xs text-slate-400">{caseFileStatus.completedPdfFilename}</span>}</>}
-            <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
-              className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
-              メール送信済みにする
-            </button>
-            <button type="button" onClick={handleMarkPostalSent} disabled={!selectedCaseId}
-              className="px-3 py-1 rounded-lg bg-orange-500 text-white text-xs font-semibold disabled:opacity-50 hover:bg-orange-600 transition-colors">
-              印刷郵送済みにする
-            </button>
+          <div className="lg:col-span-12 mb-0 flex items-center justify-between text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400 font-medium">ステータス</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                selectedCaseStatus === 'メール送信済み' ? 'bg-green-100 text-green-700' :
+                selectedCaseStatus === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
+                selectedCaseStatus === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
+                'bg-gray-100 text-gray-600'
+              }`}>{selectedCaseStatus === '報告書作成途中' ? '作成中' : selectedCaseStatus || '未着手'}</span>
+              {caseFileStatus.hasCompletedPdf && <span onClick={() => window.open(`http://localhost:8787/api/case-files/${selectedCaseId}/completed-pdf`, '_blank')} className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 mr-1">変更 →</span>
+              <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
+                className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
+                メール送信済み
+              </button>
+              <button type="button" onClick={handleMarkPostalSent} disabled={!selectedCaseId}
+                className="px-3 py-1 rounded-lg bg-orange-500 text-white text-xs font-semibold disabled:opacity-50 hover:bg-orange-600 transition-colors">
+                印刷郵送済み
+              </button>
+            </div>
           </div>
         )}
 
