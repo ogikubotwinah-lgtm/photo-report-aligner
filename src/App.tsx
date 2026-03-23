@@ -387,13 +387,17 @@ const PRINT_SAFE_CSS_VARS: CSSProperties = {
   ['--color-slate-800' as any]: '#1e293b',
   ['--color-slate-900' as any]: '#0f172a',
 };
+function getTodayReportDate() {
+  return new Date().toLocaleDateString("ja-JP", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 function getInitialReportFields() {
   return {
-    reportDate: new Date().toLocaleDateString("ja-JP", {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    }),
+    reportDate: getTodayReportDate(),
     refHospitalName: '',
     refHospital: '',
     refHospitalEmail: '',
@@ -642,27 +646,56 @@ const App: React.FC = () => {
   }, [reportCases]);
 
   const handleSelectCase = useCallback(async (c: any) => {
+    // 現在表示中の症例と同じ → 再クリック（画像・テキスト維持）
+    const isSameAsCurrentlySelected = selectedCaseId === c.case_id;
+
+    if (isSameAsCurrentlySelected) {
+      // ファイル存在状況だけ更新
+      try {
+        const fsRes = await fetch(`http://localhost:8787/api/case-files/${c.case_id}/status`);
+        if (fsRes.ok) {
+          setCaseFileStatus(await fsRes.json());
+        } else {
+          setCaseFileStatus({ hasDraft: false, hasCompletedPdf: false });
+        }
+      } catch {
+        setCaseFileStatus({ hasDraft: false, hasCompletedPdf: false });
+      }
+      return;
+    }
+
     setSelectedCaseId(c.case_id);
     setSelectedCaseStatus(c.status || '');
     setRefHospitalInput(c.referring_hospital || '');
-    setReportFields((prev) => ({
-      ...prev,
+    // 症例切り替え時は初期値ベースでリセット（前の症例データが残らないようにする）
+    setReportFields({
+      ...getInitialReportFields(),
       ownerLastName: c.owner_last_name || '',
       petName: c.pet_name || '',
       attendingVet: c.attending_vet || '',
       refHospitalName: c.referring_hospital || '',
       refHospital: c.referring_hospital || '',
       refDoctor: c.referring_doctor_name || '',
-    }));
+    });
+    setShowPage3(false);
+
+    // 症例切り替え時は画像をリセット
+    setAllPagesImages({ 1: [], 2: [], 3: [] });
+    setAllPagesHistory({ 1: [], 2: [], 3: [] });
+
+    // staleness チェック用：この症例のロードを開始したことを記録
+    draftLoadedCaseIdRef.current = c.case_id;
+    const targetCaseId = c.case_id;
 
     // 下書き復元（DB由来）
     try {
-      const res = await fetch(`http://localhost:8787/api/report-drafts/${c.case_id}`);
+      const res = await fetch(`http://localhost:8787/api/report-drafts/${targetCaseId}`);
       if (res.ok) {
         const data = await res.json();
         const raw = data?.draft_data_json;
         const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (d && typeof d === 'object') {
+          if (draftLoadedCaseIdRef.current !== targetCaseId) return;
           setRefHospitalInput(d.refHospitalName || d.refHospital || c.referring_hospital || '');
           setReportFields((prev) => ({ ...prev, ...d }));
         }
@@ -673,9 +706,10 @@ const App: React.FC = () => {
 
     // draft.json 復元（ファイル由来 — DB由来より優先）
     try {
-      const draftRes = await fetch(`http://localhost:8787/api/draft-state/${c.case_id}`);
+      const draftRes = await fetch(`http://localhost:8787/api/draft-state/${targetCaseId}`);
       if (draftRes.ok) {
         const draft = await draftRes.json();
+        if (draftLoadedCaseIdRef.current !== targetCaseId) return;
         if (draft?.reportFields && typeof draft.reportFields === 'object') {
           setRefHospitalInput(draft.reportFields.refHospitalName || draft.reportFields.refHospital || c.referring_hospital || '');
           setReportFields((prev) => ({ ...prev, ...draft.reportFields }));
@@ -684,15 +718,18 @@ const App: React.FC = () => {
           setShowPage3(draft.showPage3);
         }
 
-        // 画像復元
+        // 画像復元：全ページの画像を並列ロードし、完了後に1回だけ setState
         if (draft?.pages && typeof draft.pages === 'object') {
           const restored: Record<number, ImageData[]> = { 1: [], 2: [], 3: [] };
-          for (const [pageKey, metas] of Object.entries(draft.pages)) {
+          const pageEntries = Object.entries(draft.pages).filter(
+            ([k, v]) => [1, 2, 3].includes(Number(k)) && Array.isArray(v)
+          );
+          // 全ページ・全画像の Promise を一括で作成
+          const allImagePromises = pageEntries.map(([pageKey, metas]) => {
             const pageNum = Number(pageKey);
-            if (![1, 2, 3].includes(pageNum) || !Array.isArray(metas)) continue;
-            const imagePromises = (metas as any[]).map(async (meta) => {
+            const perPagePromises = (metas as any[]).map(async (meta) => {
               try {
-                const imgRes = await fetch(`http://localhost:8787/api/draft-images/${c.case_id}/${encodeURIComponent(meta.filename)}`);
+                const imgRes = await fetch(`http://localhost:8787/api/draft-images/${targetCaseId}/${encodeURIComponent(meta.filename)}`);
                 if (!imgRes.ok) return null;
                 const blob = await imgRes.blob();
                 const dataUrl = await new Promise<string>((resolve) => {
@@ -728,8 +765,16 @@ const App: React.FC = () => {
                 return null;
               }
             });
-            const results = await Promise.all(imagePromises);
-            restored[pageNum] = results.filter((r): r is ImageData => r !== null);
+            return Promise.all(perPagePromises).then(results => ({
+              pageNum,
+              images: results.filter((r): r is ImageData => r !== null),
+            }));
+          });
+          // 全ページ並列で待機 → 完了後に staleness チェック → 1回だけ setState
+          const allPageResults = await Promise.all(allImagePromises);
+          if (draftLoadedCaseIdRef.current !== targetCaseId) return;
+          for (const { pageNum, images } of allPageResults) {
+            restored[pageNum] = images;
           }
           if (Object.values(restored).some(arr => arr.length > 0)) {
             setAllPagesImages(restored);
@@ -751,7 +796,7 @@ const App: React.FC = () => {
     } catch {
       setCaseFileStatus({ hasDraft: false, hasCompletedPdf: false });
     }
-  }, []);
+  }, [selectedCaseId]);
 
   // --- 新規患者登録 ---
   const [newCaseOwnerLastName, setNewCaseOwnerLastName] = useState('');
@@ -904,6 +949,11 @@ const App: React.FC = () => {
     ]
   );
 
+  // ===== 自動保存ガード・ステータス =====
+  const isSavingDraftRef = useRef(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const autoSaveTimerRef = useRef<number | null>(null);
+
   // ===== 画像（ページ別）=====
   const [allPagesImages, setAllPagesImages] = useState<Record<number, ImageData[]>>({
     1: [],
@@ -915,6 +965,7 @@ const App: React.FC = () => {
     2: [],
     3: [],
   });
+  const draftLoadedCaseIdRef = useRef<string | null>(null);
   const [activeCropImageId, setActiveCropImageId] = useState<string | null>(null);
   const [activeCropViewportRect, setActiveCropViewportRect] = useState<CropViewportRect | null>(null);
   const cropDragStateRef = useRef<{
@@ -944,22 +995,51 @@ const App: React.FC = () => {
 
   // --- 下書き保存 ---
   const handleSaveDraft = useCallback(async () => {
-    if (!selectedCaseId) {
-      alert('患者を選択してください');
-      return;
+    let caseId = selectedCaseId;
+
+    // 症例未選択時は自動で新規作成
+    if (!caseId) {
+      try {
+        const autoRes = await fetch('http://localhost:8787/api/report-cases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            attending_vet: reportFields.attendingVet || '未入力',
+            owner_last_name: reportFields.ownerLastName?.trim() || '未入力',
+            pet_name: reportFields.petName?.trim() || '未入力',
+            referring_hospital: reportFields.refHospitalName || reportFields.refHospital || '未入力',
+            referring_doctor_name: reportFields.refDoctor || '未入力',
+          }),
+        });
+        if (!autoRes.ok) throw new Error('自動登録失敗');
+        const created = await autoRes.json();
+        caseId = created.case_id;
+        setSelectedCaseId(caseId);
+        setSelectedCaseStatus(created.status || '');
+        setReportCases((prev) => [created, ...prev]);
+        draftLoadedCaseIdRef.current = caseId;
+      } catch {
+        alert('保存先の患者を自動登録できませんでした。先に患者を登録してください。');
+        return;
+      }
     }
     try {
-      const res = await fetch(`http://localhost:8787/api/report-drafts/${selectedCaseId}`, {
+      // 報告日を保存時点の当日に更新
+      const todayDate = getTodayReportDate();
+      const updatedReportFields = { ...reportFields, reportDate: todayDate };
+      setReportFields(updatedReportFields);
+
+      const res = await fetch(`http://localhost:8787/api/report-drafts/${caseId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ draft_data_json: reportFields }),
+        body: JSON.stringify({ draft_data_json: updatedReportFields }),
       });
       if (!res.ok) throw new Error('保存失敗');
 
       // 未着手 → 報告書作成途中 に自動更新
-      if (selectedCaseId && selectedCaseStatus === '未着手') {
+      if (caseId && selectedCaseStatus === '未着手') {
         try {
-          const patchRes = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}/status`, {
+          const patchRes = await fetch(`http://localhost:8787/api/report-cases/${caseId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: '報告書作成途中' }),
@@ -967,38 +1047,47 @@ const App: React.FC = () => {
           if (patchRes.ok) {
             const updated = await patchRes.json();
             setSelectedCaseStatus(updated.status || '');
-            setReportCases(prev => prev.map(c => c.case_id === selectedCaseId ? updated : c));
+            setReportCases(prev => prev.map(c => c.case_id === caseId ? updated : c));
           }
         } catch (e) {
           console.log('[auto status] update failed', e);
         }
       }
 
-      // ドラフト画像をサーバーへ保存（副処理）
+      // ドラフト画像をサーバーへ保存（1枚ずつ送信で 413 回避）
+      // サーバーは filename をサニタイズするので、レスポンスから実際の保存名を取得する
+      const savedFilenameMap = new Map<string, string>(); // img.id → sanitized filename
       try {
         const allImages = Object.values(allPagesImages).flat().filter(img => img.dataUrl);
-        if (allImages.length > 0) {
-          const payload = allImages.map(img => ({
-            filename: img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`,
-            dataUrl: img.originalDataUrl || img.dataUrl,
-          }));
-          await fetch(`http://localhost:8787/api/draft-images/${selectedCaseId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ images: payload }),
-          });
+        for (const img of allImages) {
+          try {
+            const filename = img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`;
+            const saveRes = await fetch(`http://localhost:8787/api/draft-images/${caseId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ images: [{ filename, dataUrl: img.originalDataUrl || img.dataUrl }] }),
+            });
+            if (saveRes.ok) {
+              const saveData = await saveRes.json();
+              const sanitized = saveData?.saved?.[0]?.filename;
+              if (sanitized) savedFilenameMap.set(img.id, sanitized);
+            }
+          } catch (e) {
+            console.error('[draft images] failed to save single image', img.name || img.id, e);
+          }
         }
       } catch (e) {
         console.log('[draft images] save failed', e);
       }
 
       // ドラフト状態（メタデータ）をサーバーへ保存（副処理）
+      // filename はサーバーがサニタイズした名前を使う（復元時の fetch 404 を防ぐ）
       try {
         const pages: Record<string, any[]> = {};
         for (const [pageNum, imgs] of Object.entries(allPagesImages)) {
           pages[pageNum] = (imgs as any[]).map(img => ({
             id: img.id,
-            filename: img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`,
+            filename: savedFilenameMap.get(img.id) || img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`,
             row: img.row,
             rotation: img.rotation,
             crop: img.crop || null,
@@ -1009,11 +1098,11 @@ const App: React.FC = () => {
             height: img.height,
           }));
         }
-        await fetch(`http://localhost:8787/api/draft-state/${selectedCaseId}`, {
+        await fetch(`http://localhost:8787/api/draft-state/${caseId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            reportFields,
+            reportFields: updatedReportFields,
             showPage3,
             pages,
           }),
@@ -1024,20 +1113,20 @@ const App: React.FC = () => {
 
       // 基本情報を report_cases に同期（副処理）
       try {
-        const syncRes = await fetch(`http://localhost:8787/api/report-cases/${selectedCaseId}`, {
+        const syncRes = await fetch(`http://localhost:8787/api/report-cases/${caseId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            attending_vet: reportFields.attendingVet,
-            owner_last_name: reportFields.ownerLastName,
-            pet_name: reportFields.petName,
-            referring_hospital: reportFields.refHospitalName || reportFields.refHospital,
-            referring_doctor_name: reportFields.refDoctor,
+            attending_vet: updatedReportFields.attendingVet,
+            owner_last_name: updatedReportFields.ownerLastName,
+            pet_name: updatedReportFields.petName,
+            referring_hospital: updatedReportFields.refHospitalName || updatedReportFields.refHospital,
+            referring_doctor_name: updatedReportFields.refDoctor,
           }),
         });
         if (syncRes.ok) {
           const updated = await syncRes.json();
-          setReportCases(prev => prev.map(c => c.case_id === selectedCaseId ? updated : c));
+          setReportCases(prev => prev.map(c => c.case_id === caseId ? updated : c));
         }
       } catch (e) {
         console.log('[case sync] failed', e);
@@ -1048,6 +1137,83 @@ const App: React.FC = () => {
       alert('下書きの保存に失敗しました');
     }
   }, [selectedCaseId, selectedCaseStatus, reportFields, allPagesImages, showPage3]);
+
+  // --- 自動保存（画像追加・段落移動後にサイレント実行） ---
+  const autoSaveDraft = useCallback(async () => {
+    if (!selectedCaseId || isSavingDraftRef.current) return;
+    isSavingDraftRef.current = true;
+    setAutoSaveStatus('saving');
+    if (autoSaveTimerRef.current !== null) { clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; }
+    try {
+      const caseId = selectedCaseId;
+
+      // 報告日を保存時点の当日に更新
+      const todayDate = getTodayReportDate();
+      const autoSaveReportFields = { ...reportFields, reportDate: todayDate };
+      setReportFields(autoSaveReportFields);
+
+      // ドラフト画像を1枚ずつ保存
+      const savedFilenameMap = new Map<string, string>();
+      const allImages = Object.values(allPagesImages).flat().filter(img => img.dataUrl);
+      for (const img of allImages) {
+        try {
+          const filename = img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`;
+          const saveRes = await fetch(`http://localhost:8787/api/draft-images/${caseId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ images: [{ filename, dataUrl: img.originalDataUrl || img.dataUrl }] }),
+          });
+          if (saveRes.ok) {
+            const saveData = await saveRes.json();
+            const sanitized = saveData?.saved?.[0]?.filename;
+            if (sanitized) savedFilenameMap.set(img.id, sanitized);
+          }
+        } catch (e) {
+          console.error('[auto-save] image failed', img.name || img.id, e);
+        }
+      }
+
+      // ドラフト状態を保存
+      const pages: Record<string, any[]> = {};
+      for (const [pageNum, imgs] of Object.entries(allPagesImages)) {
+        pages[pageNum] = (imgs as any[]).map(img => ({
+          id: img.id,
+          filename: savedFilenameMap.get(img.id) || img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`,
+          row: img.row,
+          rotation: img.rotation,
+          crop: img.crop || null,
+          flipX: img.flipX || false,
+          flipY: img.flipY || false,
+          orderConfirmed: img.orderConfirmed,
+          width: img.width,
+          height: img.height,
+        }));
+      }
+      await fetch(`http://localhost:8787/api/draft-state/${caseId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reportFields: autoSaveReportFields, showPage3, pages }),
+      });
+      console.log('[auto-save] draft saved successfully');
+      setAutoSaveStatus('saved');
+      autoSaveTimerRef.current = window.setTimeout(() => { setAutoSaveStatus('idle'); autoSaveTimerRef.current = null; }, 3000);
+    } catch (e) {
+      console.error('[auto-save] failed', e);
+      setAutoSaveStatus('error');
+      autoSaveTimerRef.current = window.setTimeout(() => { setAutoSaveStatus('idle'); autoSaveTimerRef.current = null; }, 5000);
+    } finally {
+      isSavingDraftRef.current = false;
+    }
+  }, [selectedCaseId, reportFields, allPagesImages, showPage3]);
+
+  // autoSaveDraft の最新参照を ref で保持（非同期コールバックからの stale 参照を防ぐ）
+  const autoSaveDraftRef = useRef(autoSaveDraft);
+  autoSaveDraftRef.current = autoSaveDraft;
+
+  // 画像操作完了後に次のレンダリングサイクルで自動保存をトリガー
+  const triggerAutoSave = useCallback(() => {
+    setTimeout(() => autoSaveDraftRef.current(), 100);
+  }, []);
 
   // --- ステータス更新 ---
   const handleMarkMailSent = useCallback(async () => {
@@ -1200,8 +1366,13 @@ const App: React.FC = () => {
   const [pptxStatus, setPptxStatus] = useState<string>('');
   const [isSavingPptx, setIsSavingPptx] = useState(false);
   const [isCreatingDraft, setIsCreatingDraft] = useState(false);
+  const [gmailDraftStatus, setGmailDraftStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const gmailDraftStatusTimerRef = useRef<number | null>(null);
   const [isSendingGmail, setIsSendingGmail] = useState(false);
+  const [gmailSendStatus, setGmailSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const gmailSendStatusTimerRef = useRef<number | null>(null);
   const [isPrintMode, setIsPrintMode] = useState(false);
+  const [appNotification, setAppNotification] = useState<{ type: 'success' | 'draft' | 'error'; message: string } | null>(null);
 
   // テンプレ挿入の undo 用（直前の挿入を1回だけ戻す）
   const [lastInsert, setLastInsert] = useState<
@@ -1310,6 +1481,8 @@ useEffect(() => {
     if (currentPage === 3) setPage3Confirmed(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     else inputEl.value = '';
+    // 画像追加完了 → 自動保存
+    triggerAutoSave();
   };
 
   const rotateImage = (id: string, direction: 'left' | 'right') => {
@@ -2153,14 +2326,18 @@ ${svgParts.join('\n')}
       }
 
       window.open(data.draftUrl, '_blank');
+      setAppNotification({ type: 'draft', message: 'Gmail下書きを作成しました' });
     } catch (error) {
       console.error('Gmail draft creation failed:', error);
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
-        window.alert('Gmail下書き作成に失敗しました: サーバに接続できませんでした。photo-report-server が起動しているか確認してください。');
+        setAppNotification({ type: 'error', message: 'Gmail下書き作成に失敗しました: サーバに接続できませんでした。photo-report-server が起動しているか確認してください。' });
       } else {
-        window.alert(`Gmail下書き作成に失敗しました: ${message}`);
+        setAppNotification({ type: 'error', message: `Gmail下書き作成に失敗しました: ${message}` });
       }
+      if (gmailDraftStatusTimerRef.current !== null) clearTimeout(gmailDraftStatusTimerRef.current);
+      setGmailDraftStatus('error');
+      gmailDraftStatusTimerRef.current = window.setTimeout(() => { setGmailDraftStatus('idle'); gmailDraftStatusTimerRef.current = null; }, 5000);
     } finally {
       setIsPrintMode(false);
       setIsCreatingDraft(false);
@@ -2248,7 +2425,7 @@ ${svgParts.join('\n')}
         throw new Error(detail);
       }
 
-      window.alert('メールを送信しました。');
+      setAppNotification({ type: 'success', message: 'メールを送信しました。' });
 
       // 成果物保存（失敗しても送信成功は維持）
       if (selectedCaseId) {
@@ -2307,14 +2484,20 @@ ${svgParts.join('\n')}
           console.log('[auto status update] failed', e);
         }
       }
+      if (gmailSendStatusTimerRef.current !== null) clearTimeout(gmailSendStatusTimerRef.current);
+      setGmailSendStatus('success');
+      gmailSendStatusTimerRef.current = window.setTimeout(() => { setGmailSendStatus('idle'); gmailSendStatusTimerRef.current = null; }, 5000);
     } catch (error) {
       console.error('Gmail send failed:', error);
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
-        window.alert('Gmail送信に失敗しました: サーバに接続できませんでした。photo-report-server が起動しているか確認してください。');
+        setAppNotification({ type: 'error', message: 'Gmail送信に失敗しました: サーバに接続できませんでした。photo-report-server が起動しているか確認してください。' });
       } else {
-        window.alert(`Gmail送信に失敗しました: ${message}`);
+        setAppNotification({ type: 'error', message: `Gmail送信に失敗しました: ${message}` });
       }
+      if (gmailSendStatusTimerRef.current !== null) clearTimeout(gmailSendStatusTimerRef.current);
+      setGmailSendStatus('error');
+      gmailSendStatusTimerRef.current = window.setTimeout(() => { setGmailSendStatus('idle'); gmailSendStatusTimerRef.current = null; }, 5000);
     } finally {
       setIsPrintMode(false);
       setIsSendingGmail(false);
@@ -3992,6 +4175,7 @@ ${svgParts.join('\n')}
                                               );
                                               closeCropState();
                                               setIsOrientationOpen(false);
+                                              triggerAutoSave();
                                             }}
                                             className="h-9 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 text-sm font-semibold transition-all active:scale-95"
                                           >確定</button>
@@ -4079,6 +4263,7 @@ ${svgParts.join('\n')}
                                                 }
                                               }
                                               closeCropState();
+                                              triggerAutoSave();
                                             }}
                                             className="h-9 rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-200 text-sm font-semibold transition-all active:scale-95"
                                           >確定</button>
@@ -4160,6 +4345,7 @@ ${svgParts.join('\n')}
   rows={4}
   setActiveCropImageId={setActiveCropImageId}
   onUnassignImage={handleUnassignImage}
+  onDragEndComplete={triggerAutoSave}
 />
         </div>
 
@@ -4309,12 +4495,26 @@ ${svgParts.join('\n')}
           className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isCreatingDraft ? "作成中…" : "Gmail下書き"}
         </button>
+        {gmailDraftStatus !== 'idle' && (
+          <span className={`text-xs font-medium px-2 py-1 rounded-lg self-center ${
+            gmailDraftStatus === 'success' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+          }`}>
+            {gmailDraftStatus === 'success' ? '✓ Gmail下書きを作成しました' : 'Gmail下書きの作成に失敗'}
+          </span>
+        )}
         <button onClick={sendGmail}
           disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
           title="PDFを添付してGmailで即時送信します"
           className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           {isSendingGmail ? "送信中…" : "Gmail送信"}
         </button>
+        {gmailSendStatus !== 'idle' && (
+          <span className={`text-xs font-medium px-2 py-1 rounded-lg self-center ${
+            gmailSendStatus === 'success' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+          }`}>
+            {gmailSendStatus === 'success' ? '✓ Gmailを送信しました' : 'Gmail送信に失敗'}
+          </span>
+        )}
         <button onClick={printPdf}
           title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
           className="bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm flex items-center gap-2">
@@ -4324,13 +4524,50 @@ ${svgParts.join('\n')}
           className="bg-violet-500 hover:bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
           {isSavingPptx ? '保存中…' : 'PPTX出力'}
         </button>
-        <button onClick={handleSaveDraft} disabled={!selectedCaseId}
+        <button onClick={handleSaveDraft}
           className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           入力内容を保存
         </button>
+        {autoSaveStatus !== 'idle' && (
+          <span className={`text-xs font-medium px-2 py-1 rounded-lg ${
+            autoSaveStatus === 'saving' ? 'text-slate-500 bg-slate-100' :
+            autoSaveStatus === 'saved' ? 'text-emerald-600 bg-emerald-50' :
+            'text-rose-600 bg-rose-50'
+          }`}>
+            {autoSaveStatus === 'saving' ? '保存中...' :
+             autoSaveStatus === 'saved' ? '✓ 自動保存済み' :
+             '自動保存に失敗'}
+          </span>
+        )}
       </div>
       </div>
       </div>
+      {/* アプリ内通知モーダル */}
+      {appNotification && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30" onClick={() => setAppNotification(null)}>
+          <div className={`bg-white rounded-2xl shadow-xl p-6 max-w-md w-[90vw] border-2 ${
+            appNotification.type === 'success' ? 'border-emerald-300' :
+            appNotification.type === 'draft' ? 'border-blue-300' :
+            'border-rose-300'
+          }`} onClick={e => e.stopPropagation()}>
+            <p className={`text-base font-semibold mb-4 whitespace-pre-wrap ${
+              appNotification.type === 'success' ? 'text-emerald-700' :
+              appNotification.type === 'draft' ? 'text-blue-700' :
+              'text-rose-700'
+            }`}>{appNotification.message}</p>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setAppNotification(null)}
+                className={`px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all ${
+                  appNotification.type === 'success' ? 'bg-emerald-500 hover:bg-emerald-600' :
+                  appNotification.type === 'draft' ? 'bg-blue-500 hover:bg-blue-600' :
+                  'bg-rose-500 hover:bg-rose-600'
+                }`}
+              >OK</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

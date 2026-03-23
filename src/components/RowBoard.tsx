@@ -25,6 +25,7 @@ type Props = {
   rows?: number;
   setActiveCropImageId?: (id: string) => void;
   onUnassignImage?: (id: string) => void;
+  onDragEndComplete?: () => void;
 };
 
 // ✅ 共通カードUI（SortableItem と DragOverlay で使い回す）
@@ -172,7 +173,7 @@ function RowContainer({ row, images, setImages, setActiveCropImageId, onUnassign
   );
 }
 
-export default function RowBoard({ images, setImages, rows = 4, setActiveCropImageId, onUnassignImage }: Props) {
+export default function RowBoard({ images, setImages, rows = 4, setActiveCropImageId, onUnassignImage, onDragEndComplete }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // ✅ ドラッグ中アイテムの現在行（stale closure 回避のため ref で管理）
   const activeItemRowRef = useRef<number | null>(null);
@@ -341,8 +342,9 @@ export default function RowBoard({ images, setImages, rows = 4, setActiveCropIma
         return [...others, ...arrayMove(rowItems, oldIndex, newIndex)];
       });
       activeItemRowRef.current = null;
+      if (onDragEndComplete) onDragEndComplete();
     },
-    [setImages]
+    [setImages, onDragEndComplete]
   );
 
   const handleDragCancel = useCallback(() => {
