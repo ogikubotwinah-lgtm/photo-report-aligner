@@ -395,6 +395,15 @@ function getTodayReportDate() {
   });
 }
 
+function getOutputBaseName(reportFields: { reportDate?: string; ownerLastName?: string; petName?: string }): string {
+  let ds = new Date().toISOString().slice(0, 10);
+  const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
+  const pet = (reportFields.petName || '').trim() || 'pet';
+  return `${ds}_${owner}_${pet}`.replace(/[\\/:*?"<>|]/g, '_');
+}
+
 function getInitialReportFields() {
   return {
     reportDate: getTodayReportDate(),
@@ -952,6 +961,7 @@ const App: React.FC = () => {
   // ===== 自動保存ガード・ステータス =====
   const isSavingDraftRef = useRef(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
 
   // ===== 画像（ページ別）=====
@@ -1023,6 +1033,9 @@ const App: React.FC = () => {
         return;
       }
     }
+    // 自動保存との競合を防止（既に保存中なら中断）
+    if (isSavingDraftRef.current) return;
+    isSavingDraftRef.current = true;
     try {
       // 報告日を保存時点の当日に更新
       const todayDate = getTodayReportDate();
@@ -1132,9 +1145,12 @@ const App: React.FC = () => {
         console.log('[case sync] failed', e);
       }
 
+      setLastSavedAt(new Date());
       alert('下書きを保存しました');
     } catch {
       alert('下書きの保存に失敗しました');
+    } finally {
+      isSavingDraftRef.current = false;
     }
   }, [selectedCaseId, selectedCaseStatus, reportFields, allPagesImages, showPage3]);
 
@@ -1144,18 +1160,23 @@ const App: React.FC = () => {
     isSavingDraftRef.current = true;
     setAutoSaveStatus('saving');
     if (autoSaveTimerRef.current !== null) { clearTimeout(autoSaveTimerRef.current); autoSaveTimerRef.current = null; }
+    const targetCaseId = selectedCaseId;
     try {
-      const caseId = selectedCaseId;
+      const caseId = targetCaseId;
 
       // 報告日を保存時点の当日に更新
       const todayDate = getTodayReportDate();
       const autoSaveReportFields = { ...reportFields, reportDate: todayDate };
       setReportFields(autoSaveReportFields);
 
+      // staleness チェック①: 画像保存前
+      if (draftLoadedCaseIdRef.current !== targetCaseId) { console.log('[auto-save] aborted (stale before images)'); return; }
+
       // ドラフト画像を1枚ずつ保存
       const savedFilenameMap = new Map<string, string>();
       const allImages = Object.values(allPagesImages).flat().filter(img => img.dataUrl);
       for (const img of allImages) {
+        if (draftLoadedCaseIdRef.current !== targetCaseId) { console.log('[auto-save] aborted (stale during images)'); return; }
         try {
           const filename = img.name || `${img.id}.${(img.mimeType || 'image/jpeg').split('/')[1] || 'jpg'}`;
           const saveRes = await fetch(`http://localhost:8787/api/draft-images/${caseId}`, {
@@ -1172,6 +1193,9 @@ const App: React.FC = () => {
           console.error('[auto-save] image failed', img.name || img.id, e);
         }
       }
+
+      // staleness チェック②: draft-state 保存前
+      if (draftLoadedCaseIdRef.current !== targetCaseId) { console.log('[auto-save] aborted (stale before draft-state)'); return; }
 
       // ドラフト状態を保存
       const pages: Record<string, any[]> = {};
@@ -1194,13 +1218,19 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reportFields: autoSaveReportFields, showPage3, pages }),
       });
+
+      // staleness チェック③: setState 前
+      if (draftLoadedCaseIdRef.current !== targetCaseId) { console.log('[auto-save] aborted (stale after save)'); return; }
       console.log('[auto-save] draft saved successfully');
+      setLastSavedAt(new Date());
       setAutoSaveStatus('saved');
       autoSaveTimerRef.current = window.setTimeout(() => { setAutoSaveStatus('idle'); autoSaveTimerRef.current = null; }, 3000);
     } catch (e) {
       console.error('[auto-save] failed', e);
-      setAutoSaveStatus('error');
-      autoSaveTimerRef.current = window.setTimeout(() => { setAutoSaveStatus('idle'); autoSaveTimerRef.current = null; }, 5000);
+      if (draftLoadedCaseIdRef.current === targetCaseId) {
+        setAutoSaveStatus('error');
+        autoSaveTimerRef.current = window.setTimeout(() => { setAutoSaveStatus('idle'); autoSaveTimerRef.current = null; }, 5000);
+      }
     } finally {
       isSavingDraftRef.current = false;
     }
@@ -1210,9 +1240,14 @@ const App: React.FC = () => {
   const autoSaveDraftRef = useRef(autoSaveDraft);
   autoSaveDraftRef.current = autoSaveDraft;
 
-  // 画像操作完了後に次のレンダリングサイクルで自動保存をトリガー
+  // 画像操作完了後にデバウンスで自動保存をトリガー（300ms 内の連続呼び出しは最後の1回だけ実行）
+  const autoSaveDebounceRef = useRef<number | null>(null);
   const triggerAutoSave = useCallback(() => {
-    setTimeout(() => autoSaveDraftRef.current(), 100);
+    if (autoSaveDebounceRef.current !== null) clearTimeout(autoSaveDebounceRef.current);
+    autoSaveDebounceRef.current = window.setTimeout(() => {
+      autoSaveDebounceRef.current = null;
+      autoSaveDraftRef.current();
+    }, 300);
   }, []);
 
   // --- ステータス更新 ---
@@ -1373,6 +1408,19 @@ const App: React.FC = () => {
   const gmailSendStatusTimerRef = useRef<number | null>(null);
   const [isPrintMode, setIsPrintMode] = useState(false);
   const [appNotification, setAppNotification] = useState<{ type: 'success' | 'draft' | 'error'; message: string } | null>(null);
+  const [notificationVisible, setNotificationVisible] = useState(false);
+  const notificationCloseTimerRef = useRef<number | null>(null);
+  const dismissNotification = useCallback(() => {
+    setNotificationVisible(false);
+    if (notificationCloseTimerRef.current !== null) clearTimeout(notificationCloseTimerRef.current);
+    notificationCloseTimerRef.current = window.setTimeout(() => { setAppNotification(null); notificationCloseTimerRef.current = null; }, 200);
+  }, []);
+  useEffect(() => {
+    if (appNotification) {
+      if (notificationCloseTimerRef.current !== null) { clearTimeout(notificationCloseTimerRef.current); notificationCloseTimerRef.current = null; }
+      requestAnimationFrame(() => setNotificationVisible(true));
+    }
+  }, [appNotification]);
 
   // テンプレ挿入の undo 用（直前の挿入を1回だけ戻す）
   const [lastInsert, setLastInsert] = useState<
@@ -1481,8 +1529,6 @@ useEffect(() => {
     if (currentPage === 3) setPage3Confirmed(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     else inputEl.value = '';
-    // 画像追加完了 → 自動保存
-    triggerAutoSave();
   };
 
   const rotateImage = (id: string, direction: 'left' | 'right') => {
@@ -2178,7 +2224,10 @@ ${svgParts.join('\n')}
   await new Promise(requestAnimationFrame);
   await new Promise(requestAnimationFrame);
 
+  const prevTitle = document.title;
+  document.title = getOutputBaseName(reportFields);
   window.print();
+  document.title = prevTitle;
 
   // completed PDF保存（失敗しても印刷成功は維持）
   if (selectedCaseId) {
@@ -2198,12 +2247,7 @@ ${svgParts.join('\n')}
         reader.onload = () => { resolve((reader.result as string).split(',')[1] || ''); };
         reader.readAsDataURL(pdfBlob);
       });
-      let ds = new Date().toISOString().slice(0, 10);
-      const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
-      if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-      const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
-      const pet = (reportFields.petName || '').trim() || 'pet';
-      const filename = `${ds}_${owner}_${pet}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
+      const filename = `${getOutputBaseName(reportFields)}.pdf`;
       await fetch(`http://localhost:8787/api/completed-artifacts/${selectedCaseId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2309,7 +2353,7 @@ ${svgParts.join('\n')}
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
-      formData.append('file', new File([pdfBlob], 'Photo_Report_A4.pdf', { type: 'application/pdf' }));
+      formData.append('file', new File([pdfBlob], `${getOutputBaseName(reportFields)}.pdf`, { type: 'application/pdf' }));
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/create-draft`, {
       method: 'POST',
@@ -2409,7 +2453,7 @@ ${svgParts.join('\n')}
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
-      formData.append('file', new File([pdfBlob], 'Photo_Report_A4.pdf', { type: 'application/pdf' }));
+      formData.append('file', new File([pdfBlob], `${getOutputBaseName(reportFields)}.pdf`, { type: 'application/pdf' }));
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/send`, {
         method: 'POST',
@@ -2441,14 +2485,7 @@ ${svgParts.join('\n')}
           await fetch(`http://localhost:8787/api/completed-artifacts/${selectedCaseId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ filename: (() => {
-              let ds = new Date().toISOString().slice(0, 10);
-              const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
-              if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-              const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
-              const pet = (reportFields.petName || '').trim() || 'pet';
-              return `${ds}_${owner}_${pet}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
-            })(), dataBase64: base64, mimeType: 'application/pdf' }),
+            body: JSON.stringify({ filename: `${getOutputBaseName(reportFields)}.pdf`, dataBase64: base64, mimeType: 'application/pdf' }),
           });
         } catch (e) {
           console.log('[completed artifact] save failed', e);
@@ -2618,7 +2655,7 @@ ${svgParts.join('\n')}
         buildSlide(slide, pageNum, pageConfirmed);
       });
 
-      const fileName = 'Photo_Report_A4.pptx';
+      const fileName = `${getOutputBaseName(reportFields)}.pptx`;
       const pptxBlob = (await pptx.write({ outputType: 'blob' })) as Blob;
 
       // ダウンロード
@@ -3118,7 +3155,7 @@ ${svgParts.join('\n')}
             {(() => { const sc = reportCases.find(r => r.case_id === selectedCaseId); const days = getDaysElapsed(sc?.registered_at); const delay = getDelayLabel(days); return (
             <span>選択中: <strong>{formatCaseDisplayId(selectedCaseId ?? '')}</strong> / {selectedCaseStatus || '-'} / {formatDateShort(sc?.registered_at || '')} / {days ?? '-'}日 <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${delay.className}`}>{delay.text}</span></span>
             ); })()}
-            {caseFileStatus.hasDraft && <><span className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700">下書きあり</span>{caseFileStatus.draftUpdatedAt && <span className="text-xs text-slate-400">{new Date(caseFileStatus.draftUpdatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}</>}
+            {caseFileStatus.hasDraft && <><span className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-blue-100 text-blue-700">下書きあり</span>{caseFileStatus.draftUpdatedAt && <span className="text-xs text-slate-400">下書き保存 {new Date(caseFileStatus.draftUpdatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}</>}
             {caseFileStatus.hasCompletedPdf && <><span onClick={() => window.open(`http://localhost:8787/api/case-files/${selectedCaseId}/completed-pdf`, '_blank')} className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>{caseFileStatus.completedPdfFilename && <span className="text-xs text-slate-400">{caseFileStatus.completedPdfFilename}</span>}</>}
             <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
               className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
@@ -3132,7 +3169,7 @@ ${svgParts.join('\n')}
         )}
 
         {/* 報告書データ入力フォーム */}
-        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5 space-y-4" onKeyDown={handleEnterFocusNextInput}>
+        <div className="lg:col-span-12 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 md:p-5 space-y-4" onKeyDown={handleEnterFocusNextInput} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) triggerAutoSave(); }}>
           <div className="flex items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-200">
   <div>
     <h3 className="text-lg font-semibold text-slate-800 tracking-tight">報告書データ入力</h3>
@@ -4175,7 +4212,6 @@ ${svgParts.join('\n')}
                                               );
                                               closeCropState();
                                               setIsOrientationOpen(false);
-                                              triggerAutoSave();
                                             }}
                                             className="h-9 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 text-sm font-semibold transition-all active:scale-95"
                                           >確定</button>
@@ -4263,7 +4299,6 @@ ${svgParts.join('\n')}
                                                 }
                                               }
                                               closeCropState();
-                                              triggerAutoSave();
                                             }}
                                             className="h-9 rounded-lg bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border border-emerald-200 text-sm font-semibold transition-all active:scale-95"
                                           >確定</button>
@@ -4300,6 +4335,7 @@ ${svgParts.join('\n')}
                                             if (currentPage === 2) setPage2Confirmed(true);
                                             if (currentPage === 3) setPage3Confirmed(true);
                                           }
+                                          triggerAutoSave();
                                         }}
                                         className={`rounded-lg text-lg font-semibold transition-all shadow-sm active:scale-95 border ${img.row === num ? 'bg-orange-500 text-white border-orange-400 shadow font-bold' : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'}`}
                                         style={{ height: '44px', minHeight: '40px', padding: '0' }}
@@ -4539,13 +4575,18 @@ ${svgParts.join('\n')}
              '自動保存に失敗'}
           </span>
         )}
+        {lastSavedAt && autoSaveStatus === 'idle' && (
+          <span className="text-xs text-slate-400 px-1">
+            最終保存 {lastSavedAt.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
       </div>
       </div>
       </div>
       {/* アプリ内通知モーダル */}
       {appNotification && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/30" onClick={() => setAppNotification(null)}>
-          <div className={`bg-white rounded-2xl shadow-xl p-6 max-w-md w-[90vw] border-2 ${
+        <div className={`fixed inset-0 z-[9999] flex items-center justify-center transition-opacity duration-200 ${notificationVisible ? 'bg-black/30 opacity-100' : 'bg-black/0 opacity-0 pointer-events-none'}`} onClick={dismissNotification}>
+          <div className={`bg-white rounded-2xl shadow-xl p-6 max-w-md w-[90vw] border-2 transition-all duration-200 ${notificationVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'} ${
             appNotification.type === 'success' ? 'border-emerald-300' :
             appNotification.type === 'draft' ? 'border-blue-300' :
             'border-rose-300'
@@ -4557,7 +4598,7 @@ ${svgParts.join('\n')}
             }`}>{appNotification.message}</p>
             <div className="flex justify-end">
               <button
-                onClick={() => setAppNotification(null)}
+                onClick={dismissNotification}
                 className={`px-5 py-2 rounded-xl text-sm font-semibold text-white transition-all ${
                   appNotification.type === 'success' ? 'bg-emerald-500 hover:bg-emerald-600' :
                   appNotification.type === 'draft' ? 'bg-blue-500 hover:bg-blue-600' :
