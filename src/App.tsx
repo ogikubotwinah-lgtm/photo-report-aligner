@@ -103,11 +103,12 @@ const APPROVAL_SUBJECT = '症例報告書承認のお願い';
 const APPROVAL_BODY = '症例報告書の承認をお願いします。\n添付のPPTXをご確認ください。';
 
 function buildGmailBody(
-  params: { hospital: string; doctor: string; petName: string; isDelayed: boolean },
+  params: { hospital: string; doctor: string; petName: string; isDelayed: boolean; hasExternalFiles?: boolean },
 ): string {
-  const addressee = params.doctor
-    ? `${params.hospital}　${params.doctor}先生`
-    : `${params.hospital}　御中`;
+  const docName = (params.doctor && params.doctor !== '-' && params.doctor !== '未入力') ? params.doctor : '';
+  const addressee = docName
+    ? `${params.hospital}\n${docName}先生`
+    : `${params.hospital}\nご担当先生`;
 
   const thanksLine = params.petName
     ? `\nこのたびは、${params.petName}ちゃんをご紹介いただき、誠にありがとうございました。\n`
@@ -118,12 +119,13 @@ function buildGmailBody(
     : 'ご紹介いただきました治療報告書をお送りいたします。';
 
   const delayLine = params.isDelayed ? `\n${DELAY_APOLOGY_TEXT}\n` : '';
+  const externalFileLine = params.hasExternalFiles ? '\nなお、検査データを添付させていただきましたので、ご確認ください。' : '';
 
   return `${addressee}
 
 大変お世話になっております。
 荻窪ツイン動物病院です。
-${thanksLine}${reportLine}
+${thanksLine}${reportLine}${externalFileLine}
 ${delayLine}
 ご査収のほどよろしくお願い申し上げます。
 
@@ -401,24 +403,22 @@ function getTodayReportDate() {
 }
 
 function getOutputBaseName(reportFields: { reportDate?: string; ownerLastName?: string; petName?: string }): string {
-  let ds = new Date().toISOString().slice(0, 10);
-  const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
-  if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
   const pet = (reportFields.petName || '').trim() || 'pet';
-  return `${ds}_${owner}_${pet}`.replace(/[\\/:*?"<>|]/g, '_');
+  return `${owner}${pet}_歯科治療報告書`.replace(/[\\/:*?"<>|]/g, '_');
 }
 
-function getGmailAttachmentName(reportFields: { reportDate?: string; ownerLastName?: string; petName?: string }, ext: string): string {
-  let ds = new Date().toISOString().slice(0, 10);
-  const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
-  if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-  return `${ds}_report.${ext}`;
+function buildEmailFilename(reportFields: { ownerLastName?: string; petName?: string }, caseId: string | null, ext: string): string {
+  const sanitize = (s: string) => (s || '').replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, '_').trim();
+  const owner = sanitize(reportFields.ownerLastName || '');
+  const pet = sanitize(reportFields.petName || '');
+  const base = owner && pet ? `${owner}_${pet}_report` : `case_${caseId || 'unknown'}_report`;
+  return `${base}.${ext}`;
 }
 
 function getInitialReportFields() {
   return {
-    reportDate: getTodayReportDate(),
+    reportDate: '',
     refHospitalName: '',
     refHospital: '',
     refHospitalEmail: '',
@@ -428,7 +428,7 @@ function getInitialReportFields() {
     firstVisitDate: '',
     sedationDate: '',
     anesthesiaDate: '',
-    attendingVet: '町田健吾',
+    attendingVet: '',
     initialText: '',
     procedureText: '',
     postText: '',
@@ -704,16 +704,16 @@ const App: React.FC = () => {
 
     setSelectedCaseId(c.case_id);
     setSelectedCaseStatus(c.status || '');
-    setRefHospitalInput(c.referring_hospital || '');
+    setRefHospitalInput((c.referring_hospital === '未入力' || c.referring_hospital === '-') ? '' : (c.referring_hospital || ''));
     // 症例切り替え時は初期値ベースでリセット（前の症例データが残らないようにする）
     setReportFields({
       ...getInitialReportFields(),
       ownerLastName: c.owner_last_name || '',
       petName: c.pet_name || '',
       attendingVet: c.attending_vet || '',
-      refHospitalName: c.referring_hospital || '',
-      refHospital: c.referring_hospital || '',
-      refDoctor: c.referring_doctor_name || '',
+      refHospitalName: (c.referring_hospital === '未入力' || c.referring_hospital === '-') ? '' : (c.referring_hospital || ''),
+      refHospital: (c.referring_hospital === '未入力' || c.referring_hospital === '-') ? '' : (c.referring_hospital || ''),
+      refDoctor: (c.referring_doctor_name === '未入力' || c.referring_doctor_name === '-') ? '' : (c.referring_doctor_name || ''),
     });
     setShowPage3(false);
 
@@ -734,8 +734,12 @@ const App: React.FC = () => {
         const d = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (d && typeof d === 'object') {
           if (draftLoadedCaseIdRef.current !== targetCaseId) return;
-          setRefHospitalInput(d.refHospitalName || d.refHospital || c.referring_hospital || '');
-          setReportFields((prev) => ({ ...prev, ...d }));
+          { const h = d.refHospitalName || d.refHospital || c.referring_hospital || ''; setRefHospitalInput(h === '未入力' || h === '-' ? '' : h); }
+          const cleaned = { ...d };
+          if (cleaned.refHospitalName === '-' || cleaned.refHospitalName === '未入力') cleaned.refHospitalName = '';
+          if (cleaned.refHospital === '-' || cleaned.refHospital === '未入力') cleaned.refHospital = '';
+          if (cleaned.refDoctor === '-' || cleaned.refDoctor === '未入力') cleaned.refDoctor = '';
+          setReportFields((prev) => ({ ...prev, ...cleaned }));
         }
       }
     } catch (e) {
@@ -749,8 +753,12 @@ const App: React.FC = () => {
         const draft = await draftRes.json();
         if (draftLoadedCaseIdRef.current !== targetCaseId) return;
         if (draft?.reportFields && typeof draft.reportFields === 'object') {
-          setRefHospitalInput(draft.reportFields.refHospitalName || draft.reportFields.refHospital || c.referring_hospital || '');
-          setReportFields((prev) => ({ ...prev, ...draft.reportFields }));
+          { const h = draft.reportFields.refHospitalName || draft.reportFields.refHospital || c.referring_hospital || ''; setRefHospitalInput(h === '未入力' || h === '-' ? '' : h); }
+          const rf = { ...draft.reportFields };
+          if (rf.refHospitalName === '-' || rf.refHospitalName === '未入力') rf.refHospitalName = '';
+          if (rf.refHospital === '-' || rf.refHospital === '未入力') rf.refHospital = '';
+          if (rf.refDoctor === '-' || rf.refDoctor === '未入力') rf.refDoctor = '';
+          setReportFields((prev) => ({ ...prev, ...rf }));
         }
         if (typeof draft.showPage3 === 'boolean') {
           setShowPage3(draft.showPage3);
@@ -851,7 +859,7 @@ const App: React.FC = () => {
   // --- 新規患者登録 ---
   const [newCaseOwnerLastName, setNewCaseOwnerLastName] = useState('');
   const [newCasePetName, setNewCasePetName] = useState('');
-  const [newCaseAttendingVet, setNewCaseAttendingVet] = useState('町田健吾');
+  const [newCaseAttendingVet, setNewCaseAttendingVet] = useState('');
   const [isCreatingCase, setIsCreatingCase] = useState(false);
 
   const handleCreateCase = useCallback(async () => {
@@ -870,8 +878,8 @@ const App: React.FC = () => {
           attending_vet: newCaseAttendingVet || '未入力',
           owner_last_name: newCaseOwnerLastName.trim(),
           pet_name: newCasePetName.trim(),
-          referring_hospital: '未入力',
-          referring_doctor_name: '未入力',
+          referring_hospital: '-',
+          referring_doctor_name: '-',
         }),
       });
 
@@ -1060,8 +1068,8 @@ const App: React.FC = () => {
             attending_vet: reportFields.attendingVet || '未入力',
             owner_last_name: reportFields.ownerLastName?.trim() || '未入力',
             pet_name: reportFields.petName?.trim() || '未入力',
-            referring_hospital: reportFields.refHospitalName || reportFields.refHospital || '未入力',
-            referring_doctor_name: reportFields.refDoctor || '未入力',
+            referring_hospital: reportFields.refHospitalName || reportFields.refHospital || '-',
+            referring_doctor_name: reportFields.refDoctor || '-',
           }),
         });
         if (!autoRes.ok) throw new Error('自動登録失敗');
@@ -1351,7 +1359,7 @@ const App: React.FC = () => {
 
       const restored = { ...initial, ...saved };
       setReportFields(restored);
-      setRefHospitalInput(String(restored.refHospitalName || restored.refHospital || ""));
+      { const h = String(restored.refHospitalName || restored.refHospital || ""); setRefHospitalInput(h === '未入力' || h === '-' ? '' : h); }
     } catch {
       // JSON parse failure: ignore and keep initial values
     } finally {
@@ -1369,8 +1377,7 @@ const App: React.FC = () => {
   }, [reportFields, reportFieldsHydrated]);
 
   const handleClearReportFields = useCallback(() => {
-    const initial = getInitialReportFields();
-    setReportFields(initial);
+    setReportFields(prev => ({ ...getInitialReportFields(), reportDate: prev.reportDate }));
     setRefHospitalInput("");
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(REPORT_FIELDS_STORAGE_KEY);
@@ -1450,6 +1457,8 @@ const App: React.FC = () => {
   const [gmailDraftStatus, setGmailDraftStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const gmailDraftStatusTimerRef = useRef<number | null>(null);
   const [isSendingGmail, setIsSendingGmail] = useState(false);
+  const [externalFiles, setExternalFiles] = useState<File[]>([]);
+  const externalFileInputRef = useRef<HTMLInputElement>(null);
   const [gmailSendStatus, setGmailSendStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const gmailSendStatusTimerRef = useRef<number | null>(null);
   const [isPrintMode, setIsPrintMode] = useState(false);
@@ -2362,7 +2371,7 @@ ${svgParts.join('\n')}
     const daysElapsed = getDaysElapsed(selectedCase?.registered_at);
     const isDelayed = daysElapsed != null && daysElapsed >= 7;
 
-    const body = buildGmailBody({ hospital, doctor, petName: pet, isDelayed });
+    const body = buildGmailBody({ hospital, doctor, petName: pet, isDelayed, hasExternalFiles: externalFiles.length > 0 });
 
     setIsCreatingDraft(true);
     try {
@@ -2399,7 +2408,10 @@ ${svgParts.join('\n')}
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
-      formData.append('file', new File([pdfBlob], getGmailAttachmentName(reportFields, 'pdf'), { type: 'application/pdf' }));
+      formData.append('file', new File([pdfBlob], `${getOutputBaseName(reportFields)}.pdf`, { type: 'application/pdf' }));
+      for (const ef of externalFiles) {
+        formData.append('file', ef);
+      }
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/create-draft`, {
       method: 'POST',
@@ -2432,7 +2444,7 @@ ${svgParts.join('\n')}
       setIsPrintMode(false);
       setIsCreatingDraft(false);
     }
-  }, [isCreatingDraft, reportFields, outputPages, reportCases, selectedCaseId]);
+  }, [isCreatingDraft, reportFields, outputPages, reportCases, selectedCaseId, externalFiles]);
 
   const sendGmail = useCallback(async () => {
     if (isSendingGmail) return;
@@ -2462,7 +2474,7 @@ ${svgParts.join('\n')}
 
     if (!window.confirm(confirmMessage)) return;
 
-    const body = buildGmailBody({ hospital, doctor, petName: pet, isDelayed });
+    const body = buildGmailBody({ hospital, doctor, petName: pet, isDelayed, hasExternalFiles: externalFiles.length > 0 });
 
     setIsSendingGmail(true);
     try {
@@ -2499,7 +2511,10 @@ ${svgParts.join('\n')}
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
-      formData.append('file', new File([pdfBlob], getGmailAttachmentName(reportFields, 'pdf'), { type: 'application/pdf' }));
+      formData.append('file', new File([pdfBlob], `${getOutputBaseName(reportFields)}.pdf`, { type: 'application/pdf' }));
+      for (const ef of externalFiles) {
+        formData.append('file', ef);
+      }
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/send`, {
         method: 'POST',
@@ -2585,7 +2600,7 @@ ${svgParts.join('\n')}
       setIsPrintMode(false);
       setIsSendingGmail(false);
     }
-  }, [isSendingGmail, reportFields, outputPages, selectedCaseId]);
+  }, [isSendingGmail, reportFields, outputPages, selectedCaseId, externalFiles]);
 
   const generatePptxBlob = async (): Promise<Blob> => {
     const pptx = new pptxgen();
@@ -2709,7 +2724,7 @@ ${svgParts.join('\n')}
       formData.append('to', APPROVAL_EMAIL);
       formData.append('subject', APPROVAL_SUBJECT);
       formData.append('body', APPROVAL_BODY);
-      formData.append('file', new File([pptxBlob], getGmailAttachmentName(reportFields, 'pptx'), { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }));
+      formData.append('file', new File([pptxBlob], `${getOutputBaseName(reportFields)}.pptx`, { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }));
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/send`, {
         method: 'POST',
@@ -2854,6 +2869,7 @@ ${svgParts.join('\n')}
   type DateFieldKey = 'reportDate' | 'firstVisitDate' | 'sedationDate' | 'anesthesiaDate';
 
   const [openDateField, setOpenDateField] = useState<DateFieldKey | null>(null);
+  const [calendarCursor, setCalendarCursor] = useState<number | null>(null);
   const [calendarMonth, setCalendarMonth] = useState<Date>(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
   );
@@ -2896,6 +2912,7 @@ ${svgParts.join('\n')}
     const parsed = parseCalendarDate(value);
     const base = parsed || new Date();
     setCalendarMonth(new Date(base.getFullYear(), base.getMonth(), 1));
+    setCalendarCursor(parsed ? parsed.getDate() : new Date().getDate());
     setOpenDateField(field);
   }, [parseCalendarDate, reportFields]);
 
@@ -2940,6 +2957,47 @@ ${svgParts.join('\n')}
   const moveCalendarMonth = useCallback((offset: number) => {
     setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
   }, []);
+
+  const handleCalendarKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!openDateField) return;
+    const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
+    const cur = calendarCursor ?? 1;
+
+    const moveCursor = (offset: number) => {
+      const next = cur + offset;
+      if (next > daysInMonth) {
+        setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+        setCalendarCursor(next - daysInMonth);
+      } else if (next < 1) {
+        const prevMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 0);
+        setCalendarMonth(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), 1));
+        setCalendarCursor(prevMonth.getDate() + next);
+      } else {
+        setCalendarCursor(next);
+      }
+    };
+
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      moveCursor(1);
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      moveCursor(-1);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveCursor(7);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveCursor(-7);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      selectCalendarDate(cur);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeCalendar();
+    }
+  }, [openDateField, calendarMonth, calendarCursor, selectCalendarDate, closeCalendar]);
 
   const focusAndScroll = useCallback((el: HTMLElement | null) => {
     if (!el) return;
@@ -3105,12 +3163,17 @@ ${svgParts.join('\n')}
     return 'mt-4';
   }, [filledDateCount]);
 
-  const getEmptyFieldToneClass = useCallback((value: unknown) => {
+  const [focusedFieldIndex, setFocusedFieldIndex] = useState<number>(-1);
+
+  const getEmptyFieldToneClass = useCallback((value: unknown, fieldIndex?: number) => {
+    if (focusedFieldIndex < 0 || fieldIndex == null || fieldIndex >= focusedFieldIndex) {
+      return 'bg-white border-slate-200 text-slate-900';
+    }
     const isEmpty = String(value ?? '').trim() === '';
     return isEmpty
-      ? 'bg-emerald-50/50 border-emerald-100 text-slate-800'
+      ? 'bg-amber-100/70 border-amber-400 ring-1 ring-amber-200 text-slate-800'
       : 'bg-white border-slate-200 text-slate-900';
-  }, []);
+  }, [focusedFieldIndex]);
 
   const handleEnterFocusNextInput = useCallback((e: React.KeyboardEvent<HTMLElement>) => {
     if (e.key !== 'Enter' || (e.nativeEvent as KeyboardEvent).isComposing) return;
@@ -3119,6 +3182,9 @@ ${svgParts.join('\n')}
     if (!target) return;
     const tag = target.tagName.toLowerCase();
     if (tag !== 'input' && tag !== 'select') return;
+
+    // カレンダー展開中の日付欄ではEnter移動しない
+    if (target.closest('[data-date-field]') && openDateField) return;
 
     if (tag === 'input') {
       const inputEl = target as HTMLInputElement;
@@ -3151,7 +3217,7 @@ ${svgParts.join('\n')}
     if (idx >= 0 && idx < focusables.length - 1) {
       focusAndScroll(focusables[idx + 1]);
     }
-  }, [focusAndScroll]);
+  }, [focusAndScroll, openDateField]);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-4 font-sans">
@@ -3170,6 +3236,7 @@ ${svgParts.join('\n')}
               <input value={newCaseOwnerLastName} onChange={(e) => setNewCaseOwnerLastName(e.target.value)} placeholder="飼い主姓" className="border border-slate-200 rounded-lg px-2 py-1.5" />
               <input value={newCasePetName} onChange={(e) => setNewCasePetName(e.target.value)} placeholder="ペット名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
               <select value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+                <option value=""></option>
                 {ATTENDING_VET_OPTIONS.map(name => (
                   <option key={name} value={name}>{name}</option>
                 ))}
@@ -3246,7 +3313,7 @@ ${svgParts.join('\n')}
                             c.status === 'メール送信済み' ? 'bg-green-100 text-green-700' :
                             c.status === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
                             c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
-                            c.status === '承認待ち' ? 'bg-purple-100 text-purple-700' :
+                            c.status === '承認待ち' ? 'bg-fuchsia-100 text-fuchsia-700' :
                             'bg-gray-100 text-gray-600'
                           }`}>{statusLabel}</span>
                           {casePdfMap[c.case_id] && <span title="クリックでPDFを開く" onClick={(e) => { e.stopPropagation(); window.open(`http://localhost:8787/api/case-files/${c.case_id}/completed-pdf`, '_blank'); }} className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
@@ -3256,7 +3323,7 @@ ${svgParts.join('\n')}
                         <span>{formatCaseDisplayId(c.case_id)}</span>
                         <span>{formatDateShort(c.registered_at)}</span>
                         <span className="text-gray-300">|</span>
-                        <span className="text-gray-500">{c.referring_hospital}</span>
+                        <span className="text-gray-500">{(() => { const h = (c.referring_hospital || '').trim(); const d = (c.referring_doctor_name || '').trim(); const isEmpty = (s: string) => !s || s === '未入力' || s === '-'; if (!isEmpty(h) && !isEmpty(d)) return `${h} − ${d}`; if (!isEmpty(h)) return h; return '-'; })()}</span>
                       </div>
                     </div>); })()}
                   </div>
@@ -3270,19 +3337,8 @@ ${svgParts.join('\n')}
         {/* 選択中の患者情報 */}
         {selectedCaseId && (
           <div className="lg:col-span-12 mb-0 flex items-center justify-between text-sm bg-slate-50 border border-slate-200 rounded-xl px-4 py-2">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-400 font-medium">ステータス</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                selectedCaseStatus === 'メール送信済み' ? 'bg-green-100 text-green-700' :
-                selectedCaseStatus === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
-                selectedCaseStatus === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
-                selectedCaseStatus === '承認待ち' ? 'bg-purple-100 text-purple-700' :
-                'bg-gray-100 text-gray-600'
-              }`}>{selectedCaseStatus === '報告書作成途中' ? '作成中' : selectedCaseStatus || '未着手'}</span>
-              {caseFileStatus.hasCompletedPdf && <span onClick={() => window.open(`http://localhost:8787/api/case-files/${selectedCaseId}/completed-pdf`, '_blank')} className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
-            </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400 mr-1">変更 →</span>
+              <span className="text-sm font-semibold text-slate-600 mr-1">ステータス変更 →</span>
               <button type="button" onClick={handleMarkMailSent} disabled={!selectedCaseId}
                 className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-green-700 transition-colors">
                 メール送信済み
@@ -3292,7 +3348,7 @@ ${svgParts.join('\n')}
                 印刷郵送済み
               </button>
               <button type="button" onClick={handleRequestApproval} disabled={!selectedCaseId || isRequestingApproval}
-                className="px-3 py-1 rounded-lg bg-purple-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-purple-700 transition-colors">
+                className="px-3 py-1 rounded-lg bg-fuchsia-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-fuchsia-700 transition-colors">
                 {isRequestingApproval ? '送信中…' : '承認待ち'}
               </button>
             </div>
@@ -3309,14 +3365,15 @@ ${svgParts.join('\n')}
     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest whitespace-nowrap">報告日</label>
     <div className="w-48 relative" data-date-field="reportDate">
       <input
-        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.reportDate)} bg-white`}
-        placeholder="202X年XX月XX日"
+        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.reportDate, 0)} bg-white`}
+        onFocus={() => setFocusedFieldIndex(0)}
+        placeholder=""
         value={reportFields.reportDate}
         readOnly
         onClick={() => openCalendar('reportDate')}
       />
       {openDateField === 'reportDate' && (
-        <div className="absolute right-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
+        <div className="absolute right-0 top-full mt-2 z-40 w-72 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl" tabIndex={-1} onKeyDown={handleCalendarKeyDown} ref={el => { if (el) requestAnimationFrame(() => el.focus()); }}>
           <div className="flex items-center justify-between mb-2">
             <button
               type="button"
@@ -3356,7 +3413,9 @@ ${svgParts.join('\n')}
                   className={`h-8 rounded-lg text-base font-medium transition-colors ${
                     isSelected
                       ? 'bg-orange-500 text-white'
-                      : 'text-slate-700 hover:bg-slate-100'
+                      : day === calendarCursor
+                        ? 'bg-orange-100 text-orange-800 ring-1 ring-orange-300'
+                        : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
                   {day}
@@ -3391,17 +3450,19 @@ ${svgParts.join('\n')}
                   {/* 飼い主姓／ペット名／担当獣医師ブロック（先頭へ移動） */}
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">飼い主姓</label>
-                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.ownerLastName)} bg-white`}
-                      placeholder="山田"
+                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.ownerLastName, 1)} bg-white`}
+                      placeholder=""
                       value={reportFields.ownerLastName}
+                      onFocus={() => setFocusedFieldIndex(1)}
                       onChange={e => setReportFields(v => ({ ...v, ownerLastName: e.target.value }))}
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">ペット名</label>
-                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.petName)} bg-white`}
-                      placeholder="タロウ"
+                    <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.petName, 2)} bg-white`}
+                      placeholder=""
                       value={reportFields.petName}
+                      onFocus={() => setFocusedFieldIndex(2)}
                       onChange={e => setReportFields(v => ({ ...v, petName: e.target.value }))}
                       onKeyDown={e => {
                         if (e.key === 'Tab' && !e.shiftKey) {
@@ -3422,10 +3483,11 @@ ${svgParts.join('\n')}
                       <button
                         id="attending-vet-btn"
                         type="button"
-                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.attendingVet)} bg-white`}
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.attendingVet, 3)} bg-white`}
                         aria-haspopup="listbox"
                         aria-expanded={isAttendingVetDropdownOpen}
                         onFocus={() => {
+                          setFocusedFieldIndex(3);
                           if (!shouldOpenAttendingVetOnFocusRef.current) return;
                           shouldOpenAttendingVetOnFocusRef.current = false;
                           setIsAttendingVetDropdownOpen(true);
@@ -3482,8 +3544,9 @@ ${svgParts.join('\n')}
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
                     <div className="relative" data-date-field="firstVisitDate">
                       <input
-                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate)} bg-white`}
-                        placeholder="202X年XX月XX日"
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate, 4)} bg-white`}
+                        onFocus={() => setFocusedFieldIndex(4)}
+                        placeholder=""
                         value={reportFields.firstVisitDate}
                         readOnly
                         onClick={() => openCalendar("firstVisitDate")}
@@ -3491,7 +3554,7 @@ ${svgParts.join('\n')}
                       />
                       {openDateField === "firstVisitDate" && (
                         <div className="absolute z-20 mt-1 left-0">
-                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64" tabIndex={-1} onKeyDown={handleCalendarKeyDown} ref={el => { if (el) requestAnimationFrame(() => el.focus()); }}>
                             <div className="flex items-center justify-between mb-2">
                               <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(-1)}>
                                 <span className="text-xl leading-none">{'<'}</span>
@@ -3511,7 +3574,7 @@ ${svgParts.join('\n')}
                                   <button
                                     key={idx}
                                     type="button"
-                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    className={`w-7 h-7 rounded text-center ${cell === calendarCursor ? 'bg-orange-100 text-orange-800 ring-1 ring-orange-300' : 'hover:bg-blue-100'}`}
                                     onClick={() => selectCalendarDate(cell)}
                                   >
                                     {cell}
@@ -3532,8 +3595,9 @@ ${svgParts.join('\n')}
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">鎮静日</label>
                     <div className="relative" data-date-field="sedationDate">
                       <input
-                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate)} bg-white`}
-                        placeholder="202X年XX月XX日"
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.sedationDate, 5)} bg-white`}
+                        onFocus={() => setFocusedFieldIndex(5)}
+                        placeholder=""
                         value={reportFields.sedationDate}
                         readOnly
                         onClick={() => openCalendar("sedationDate")}
@@ -3541,7 +3605,7 @@ ${svgParts.join('\n')}
                       />
                       {openDateField === "sedationDate" && (
                         <div className="absolute z-20 mt-1 left-0">
-                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64" tabIndex={-1} onKeyDown={handleCalendarKeyDown} ref={el => { if (el) requestAnimationFrame(() => el.focus()); }}>
                             <div className="flex items-center justify-between mb-2">
                               <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(-1)}>
                                 <span className="text-xl leading-none">{'<'}</span>
@@ -3561,7 +3625,7 @@ ${svgParts.join('\n')}
                                   <button
                                     key={idx}
                                     type="button"
-                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    className={`w-7 h-7 rounded text-center ${cell === calendarCursor ? 'bg-orange-100 text-orange-800 ring-1 ring-orange-300' : 'hover:bg-blue-100'}`}
                                     onClick={() => selectCalendarDate(cell)}
                                   >
                                     {cell}
@@ -3582,8 +3646,9 @@ ${svgParts.join('\n')}
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">全身麻酔日</label>
                     <div className="relative" data-date-field="anesthesiaDate">
                       <input
-                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate)} bg-white`}
-                        placeholder="202X年XX月XX日"
+                        className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.anesthesiaDate, 6)} bg-white`}
+                        onFocus={() => setFocusedFieldIndex(6)}
+                        placeholder=""
                         value={reportFields.anesthesiaDate}
                         readOnly
                         onClick={() => openCalendar("anesthesiaDate")}
@@ -3591,7 +3656,7 @@ ${svgParts.join('\n')}
                       />
                       {openDateField === "anesthesiaDate" && (
                         <div className="absolute z-20 mt-1 left-0">
-                          <div className="bg-white border rounded shadow-lg p-2 w-64">
+                          <div className="bg-white border rounded shadow-lg p-2 w-64" tabIndex={-1} onKeyDown={handleCalendarKeyDown} ref={el => { if (el) requestAnimationFrame(() => el.focus()); }}>
                             <div className="flex items-center justify-between mb-2">
                               <button type="button" className="font-bold text-gray-700 hover:text-orange-600 px-3 py-2 rounded transition-colors cursor-pointer" onClick={() => moveCalendarMonth(-1)}>
                                 <span className="text-xl leading-none">{'<'}</span>
@@ -3611,7 +3676,7 @@ ${svgParts.join('\n')}
                                   <button
                                     key={idx}
                                     type="button"
-                                    className="w-7 h-7 rounded hover:bg-blue-100 text-center"
+                                    className={`w-7 h-7 rounded text-center ${cell === calendarCursor ? 'bg-orange-100 text-orange-800 ring-1 ring-orange-300' : 'hover:bg-blue-100'}`}
                                     onClick={() => selectCalendarDate(cell)}
                                   >
                                     {cell}
@@ -3636,8 +3701,9 @@ ${svgParts.join('\n')}
                     <input
                       id="ref-hospital-input"
                       ref={refHospitalInputRef}
-                      className={`w-full max-w-[520px] h-11 px-3 py-2 rounded-xl border text-base ${getEmptyFieldToneClass(refHospitalInput)} bg-white`}
-                      placeholder="例：中川動物病院"
+                      className={`w-full max-w-[520px] h-11 px-3 py-2 rounded-xl border text-base ${getEmptyFieldToneClass(refHospitalInput, 7)} bg-white`}
+                      onFocus={() => setFocusedFieldIndex(7)}
+                      placeholder=""
                       value={refHospitalInput}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -3694,8 +3760,9 @@ ${svgParts.join('\n')}
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">紹介病院メールアドレス</label>
-                    <input id="ref-hospital-email" className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail)} bg-white`}
-                      placeholder="example@gmail.com"
+                    <input id="ref-hospital-email" className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refHospitalEmail, 8)} bg-white`}
+                      onFocus={() => setFocusedFieldIndex(8)}
+                      placeholder=""
                       value={reportFields.refHospitalEmail}
                       onChange={e => setReportFields(v => ({ ...v, refHospitalEmail: e.target.value }))}
                     />
@@ -3710,9 +3777,10 @@ ${svgParts.join('\n')}
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">先生名</label>
                     <div className="relative">
-                      <input className={`w-full h-11 border rounded-xl px-3 pr-12 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refDoctor)} bg-white`}
+                      <input className={`w-full h-11 border rounded-xl px-3 pr-12 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.refDoctor, 9)} bg-white`}
+                        onFocus={() => setFocusedFieldIndex(9)}
                         id="ref-doctor-input"
-                        placeholder="△△"
+                        placeholder=""
                         value={reportFields.refDoctor}
                         onChange={e => setReportFields(v => ({ ...v, refDoctor: e.target.value }))}
                       />
@@ -3809,10 +3877,11 @@ ${svgParts.join('\n')}
               {/* 主訴（新規：テキスト入力） */}
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">主訴</label>
-                <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.chiefComplaint)} bg-white`}
+                <input className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all ${getEmptyFieldToneClass(reportFields.chiefComplaint, 10)} bg-white`}
+                  onFocus={() => setFocusedFieldIndex(10)}
                   style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
                   id="chief-complaint-input"
-                  placeholder="主な症状や主訴"
+                  placeholder=""
                   value={reportFields.chiefComplaint}
                   onChange={e => setReportFields(v => ({ ...v, chiefComplaint: e.target.value }))}
                 />
@@ -3822,7 +3891,7 @@ ${svgParts.join('\n')}
                 <textarea className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base min-h-[80px] focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
                   style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', maxHeight: '18.26cm', overflowY: 'auto' }}
                   id="initial-textarea"
-                  placeholder="初診時の所見など..."
+                  placeholder=""
                   value={reportFields.initialText}
                   onKeyDown={(e) => {
                     if (e.key === 'Tab' && !e.shiftKey) {
@@ -3938,7 +4007,7 @@ ${svgParts.join('\n')}
                   <button
                     type="button"
                     tabIndex={-1}
-                    className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
+                    className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '', 11)} bg-white`}
                     aria-haspopup="listbox"
                     aria-expanded={isThankYouTextTypeDropdownOpen}
                     onFocus={() => {
@@ -4012,7 +4081,7 @@ ${svgParts.join('\n')}
                       type="text"
                       size={Math.max(((reportFields as any).page3PhotoLabel || '').length + 1, 10)}
                       className="border-0 outline-none bg-transparent text-base px-0 h-full min-w-[10ch] max-w-[30ch] placeholder:text-slate-400"
-                      placeholder="術後口腔内写真"
+                      placeholder=""
                       value={(reportFields as any).page3PhotoLabel || ''}
                       onChange={e => setReportFields(v => ({ ...v, page3PhotoLabel: e.target.value }))}
                     />
@@ -4048,7 +4117,7 @@ ${svgParts.join('\n')}
                   <button
                     type="button"
                     tabIndex={-1}
-                    className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '')} bg-white`}
+                    className={`w-full h-11 border rounded-xl px-3 py-2 text-base text-left focus:ring-2 focus:ring-orange-500 outline-none transition-all flex items-center ${getEmptyFieldToneClass(reportFields.thankYouTextType || '', 11)} bg-white`}
                     aria-haspopup="listbox"
                     aria-expanded={isThankYouTextTypeDropdownOpen}
                     onFocus={() => {
@@ -4543,24 +4612,24 @@ ${svgParts.join('\n')}
               </div>
             </div>
           </div>
-          {/* 右: Yオフセット調整 */}
-          <div className="flex-1 flex justify-center">
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm px-4 py-3 flex flex-col w-full max-w-[520px]">
-              <div className="flex items-center w-full text-left mb-2">
-                <span className="text-base font-semibold text-slate-700">Yオフセット調整</span>
+          {/* 右: Yオフセット調整 + 外部ファイル添付 */}
+          <div className="flex-1 flex flex-col items-center">
+            <div className="rounded-2xl border border-slate-200/80 bg-white shadow px-5 py-4 flex flex-col w-full max-w-[520px]">
+              <div className="flex items-center w-full text-left mb-3 pb-2.5 border-b border-slate-300/60">
+                <span className="text-base font-bold text-slate-700 uppercase tracking-wider">Yオフセット調整</span>
                 <div className="flex-1" />
                 <button
                   type="button"
                   onClick={resetCurrentPagePreviewYOffsets}
-                  className="text-base px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors ml-2"
+                  className="text-sm px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors ml-2"
                 >
                   このページをリセット
                 </button>
               </div>
-              <div>
+              <div className="space-y-1.5">
                 {activePreviewYOffsetGroup.items.map((item, idx) => (
-                  <label key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto] items-center gap-2 mb-2 last:mb-0">
-                    <span className="text-base text-slate-700">{item.label}</span>
+                  <div key={`${item.key}-${idx}`} className="grid grid-cols-[1fr_auto] items-center gap-3">
+                    <span className="text-base text-slate-600">{item.label}</span>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -4577,7 +4646,7 @@ ${svgParts.join('\n')}
                         onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, -0.01))}
                         onTouchEnd={stopContinuousAdjust}
                         onTouchCancel={stopContinuousAdjust}
-                        className="h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-700 transition-colors"
+                        className="h-9 w-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors flex items-center justify-center"
                         aria-label={`${item.label} を上へ移動`}
                         title="上へ移動"
                       >
@@ -4586,7 +4655,7 @@ ${svgParts.join('\n')}
                       <input
                         type="number"
                         step="0.01"
-                        className="w-20 h-10 rounded-lg border border-slate-200 bg-white px-2 text-base text-right focus:ring-2 focus:ring-orange-500 outline-none"
+                        className="w-[4.5rem] h-9 rounded-lg border border-slate-200 bg-white px-2 text-base text-right tabular-nums focus:ring-2 focus:ring-orange-400 outline-none transition-colors"
                         value={previewYOffsets[item.key]}
                         onChange={(e) => {
                           const raw = e.target.value;
@@ -4597,7 +4666,7 @@ ${svgParts.join('\n')}
                           }));
                         }}
                       />
-                      <span className="text-base text-slate-500">cm</span>
+                      <span className="text-sm text-slate-400 w-5">cm</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -4613,16 +4682,74 @@ ${svgParts.join('\n')}
                         onTouchStart={() => startContinuousAdjust(() => nudgePreviewYOffset(item.key, 0.01))}
                         onTouchEnd={stopContinuousAdjust}
                         onTouchCancel={stopContinuousAdjust}
-                        className="h-10 px-3 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-sm font-semibold text-slate-700 transition-colors"
+                        className="h-9 w-9 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-semibold text-slate-500 hover:text-slate-700 transition-colors flex items-center justify-center"
                         aria-label={`${item.label} を下へ移動`}
                         title="下へ移動"
                       >
                         ▽
                       </button>
                     </div>
-                  </label>
+                  </div>
                 ))}
               </div>
+            </div>
+
+            {/* 外部ファイル添付 */}
+            <div className="rounded-2xl border border-slate-200/80 bg-white shadow px-5 py-4 flex flex-col w-full max-w-[520px] mt-4">
+              <span className="text-base font-bold text-slate-700 uppercase tracking-wider mb-3 pb-2.5 border-b border-slate-300/60">外部ファイル添付</span>
+              <div
+                className="border-2 border-dashed border-slate-300 rounded-xl py-5 px-4 text-center cursor-pointer bg-slate-50/60 hover:border-orange-400 hover:bg-orange-50/50 transition-all"
+                onClick={() => externalFileInputRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={e => {
+                  e.preventDefault(); e.stopPropagation();
+                  const files = Array.from(e.dataTransfer.files);
+                  setExternalFiles(prev => {
+                    const next = [...prev];
+                    for (const f of files) {
+                      if (next.length >= 5) break;
+                      if (f.size > 10 * 1024 * 1024) continue;
+                      if (!next.some(x => x.name === f.name && x.size === f.size)) next.push(f);
+                    }
+                    return next;
+                  });
+                }}
+              >
+                <p className="text-base text-slate-600 leading-relaxed">ファイルをドラッグ＆ドロップ<br />またはクリックして選択</p>
+                <p className="text-sm text-slate-500 mt-2">最大5ファイル / 各10MBまで</p>
+                <input
+                  ref={externalFileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    const files = Array.from(e.target.files || []);
+                    setExternalFiles(prev => {
+                      const next = [...prev];
+                      for (const f of files) {
+                        if (next.length >= 5) break;
+                        if (f.size > 10 * 1024 * 1024) continue;
+                        if (!next.some(x => x.name === f.name && x.size === f.size)) next.push(f);
+                      }
+                      return next;
+                    });
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+              {externalFiles.length > 0 && (
+                <ul className="mt-3 space-y-1.5">
+                  {externalFiles.map((f, i) => (
+                    <li key={`${f.name}-${i}`} className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-lg px-3 py-2.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base text-slate-700 truncate">{f.name}</span>
+                        <span className="text-sm text-slate-400 flex-shrink-0">{(f.size / 1024).toFixed(0)}KB</span>
+                      </div>
+                      <button type="button" onClick={() => setExternalFiles(prev => prev.filter((_, idx) => idx !== i))} className="text-sm text-slate-400 hover:text-rose-500 ml-3 flex-shrink-0 transition-colors">削除</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>
