@@ -97,6 +97,10 @@ function getDelayLabel(days: number | null): { text: string; className: string }
 
 const ATTENDING_VET_OPTIONS: string[] = ['町田健吾', '江成翔馬', '神田珠希', '小林嵩', '金田七海'];
 const DELAY_APOLOGY_TEXT = 'ご報告が遅くなり申し訳ございません。';
+const APPROVAL_EMAIL = 'kengomachida@gmail.com';
+const APPROVAL_VET = '町田健吾';
+const APPROVAL_SUBJECT = '症例報告書承認のお願い';
+const APPROVAL_BODY = '症例報告書の承認をお願いします。\n添付のPPTXをご確認ください。';
 
 function buildGmailBody(
   params: { hospital: string; doctor: string; petName: string; isDelayed: boolean },
@@ -369,6 +373,7 @@ const PREVIEW_Y_OFFSET_INITIAL: PreviewYOffsetMap = {
 };
 
 const REPORT_FIELDS_STORAGE_KEY = "photo-report-aligner:reportFields";
+const SELECTED_CASE_ID_STORAGE_KEY = "photo-report-aligner:selectedCaseId";
 const SERVER_BASE_URL = (import.meta as any).env?.VITE_SERVER_BASE_URL?.trim() || "http://localhost:8787";
 // Tailwind v4 uses OKLCH-based CSS variables for its default palette.
 // html2canvas may fail when computed styles contain `oklch(...)`.
@@ -402,6 +407,13 @@ function getOutputBaseName(reportFields: { reportDate?: string; ownerLastName?: 
   const owner = (reportFields.ownerLastName || '').trim() || 'unknown';
   const pet = (reportFields.petName || '').trim() || 'pet';
   return `${ds}_${owner}_${pet}`.replace(/[\\/:*?"<>|]/g, '_');
+}
+
+function getGmailAttachmentName(reportFields: { reportDate?: string; ownerLastName?: string; petName?: string }, ext: string): string {
+  let ds = new Date().toISOString().slice(0, 10);
+  const m = (reportFields.reportDate || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if (m) ds = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  return `${ds}_report.${ext}`;
 }
 
 function getInitialReportFields() {
@@ -621,7 +633,9 @@ const App: React.FC = () => {
 
   // --- 患者一覧 ---
   const [reportCases, setReportCases] = useState<any[]>([]);
-  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
+  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(() => {
+    try { return window.localStorage.getItem(SELECTED_CASE_ID_STORAGE_KEY) || null; } catch { return null; }
+  });
   const [selectedCaseStatus, setSelectedCaseStatus] = useState<string>('');
   const [caseFileStatus, setCaseFileStatus] = useState<{ hasDraft: boolean; draftUpdatedAt?: string | null; hasCompletedPdf: boolean; completedPdfFilename?: string | null }>({ hasDraft: false, hasCompletedPdf: false });
   const [casePdfMap, setCasePdfMap] = useState<Record<string, boolean>>({});
@@ -629,6 +643,7 @@ const App: React.FC = () => {
   const [caseStatusFilter, setCaseStatusFilter] = useState('未処理');
   const [caseSearchText, setCaseSearchText] = useState('');
   const [showOnlyDelayedCases, setShowOnlyDelayedCases] = useState(false);
+  const [showOnlyMyCases, setShowOnlyMyCases] = useState(false);
 
   useEffect(() => {
     fetch('http://localhost:8787/api/report-cases')
@@ -636,6 +651,17 @@ const App: React.FC = () => {
       .then(data => setReportCases(data))
       .catch(err => console.error('[report-cases]', err));
   }, []);
+
+  // selectedCaseId を localStorage に保存
+  useEffect(() => {
+    try {
+      if (selectedCaseId) {
+        window.localStorage.setItem(SELECTED_CASE_ID_STORAGE_KEY, selectedCaseId);
+      } else {
+        window.localStorage.removeItem(SELECTED_CASE_ID_STORAGE_KEY);
+      }
+    } catch { /* ignore */ }
+  }, [selectedCaseId]);
 
   useEffect(() => {
     fetch('http://localhost:8787/api/case-files/map')
@@ -654,11 +680,14 @@ const App: React.FC = () => {
       .catch(() => { setCasePdfMap({}); setCaseDraftMap({}); });
   }, [reportCases]);
 
+  const allPagesImagesRef = useRef<Record<number, ImageData[]>>({ 1: [], 2: [], 3: [] });
+
   const handleSelectCase = useCallback(async (c: any) => {
     // 現在表示中の症例と同じ → 再クリック（画像・テキスト維持）
     const isSameAsCurrentlySelected = selectedCaseId === c.case_id;
 
-    if (isSameAsCurrentlySelected) {
+    const hasAnyImages = Object.values(allPagesImagesRef.current).some(arr => arr.length > 0);
+    if (isSameAsCurrentlySelected && hasAnyImages) {
       // ファイル存在状況だけ更新
       try {
         const fsRes = await fetch(`http://localhost:8787/api/case-files/${c.case_id}/status`);
@@ -806,6 +835,18 @@ const App: React.FC = () => {
       setCaseFileStatus({ hasDraft: false, hasCompletedPdf: false });
     }
   }, [selectedCaseId]);
+
+  // リロード時に前回選択していた症例を自動復元
+  const hasAutoRestoredRef = useRef(false);
+  useEffect(() => {
+    if (hasAutoRestoredRef.current) return;
+    if (reportCases.length === 0) return;
+    if (!selectedCaseId) return;
+    const matched = reportCases.find((c: any) => c.case_id === selectedCaseId);
+    if (!matched) return;
+    hasAutoRestoredRef.current = true;
+    handleSelectCase(matched);
+  }, [reportCases, selectedCaseId, handleSelectCase]);
 
   // --- 新規患者登録 ---
   const [newCaseOwnerLastName, setNewCaseOwnerLastName] = useState('');
@@ -970,6 +1011,8 @@ const App: React.FC = () => {
     2: [],
     3: [],
   });
+  allPagesImagesRef.current = allPagesImages;
+
   const [allPagesHistory, setAllPagesHistory] = useState<Record<number, ImageData[][]>>({
     1: [],
     2: [],
@@ -1250,6 +1293,8 @@ const App: React.FC = () => {
     }, 300);
   }, []);
 
+  const [isRequestingApproval, setIsRequestingApproval] = useState(false);
+
   // --- ステータス更新 ---
   const handleMarkMailSent = useCallback(async () => {
     if (!selectedCaseId) { alert('患者を選択してください'); return; }
@@ -1282,6 +1327,7 @@ const App: React.FC = () => {
       alert('ステータスを印刷郵送済みに更新しました');
     } catch { alert('ステータス更新に失敗しました'); }
   }, [selectedCaseId]);
+
 
   useEffect(() => {
     const initial = getInitialReportFields();
@@ -2353,7 +2399,7 @@ ${svgParts.join('\n')}
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
-      formData.append('file', new File([pdfBlob], `${getOutputBaseName(reportFields)}.pdf`, { type: 'application/pdf' }));
+      formData.append('file', new File([pdfBlob], getGmailAttachmentName(reportFields, 'pdf'), { type: 'application/pdf' }));
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/create-draft`, {
       method: 'POST',
@@ -2453,7 +2499,7 @@ ${svgParts.join('\n')}
       formData.append('to', to);
       formData.append('subject', subject);
       formData.append('body', body);
-      formData.append('file', new File([pdfBlob], `${getOutputBaseName(reportFields)}.pdf`, { type: 'application/pdf' }));
+      formData.append('file', new File([pdfBlob], getGmailAttachmentName(reportFields, 'pdf'), { type: 'application/pdf' }));
 
       const response = await fetch(`${SERVER_BASE_URL}/api/gmail/send`, {
         method: 'POST',
@@ -2541,6 +2587,162 @@ ${svgParts.join('\n')}
     }
   }, [isSendingGmail, reportFields, outputPages, selectedCaseId]);
 
+  const generatePptxBlob = async (): Promise<Blob> => {
+    const pptx = new pptxgen();
+    pptx.defineLayout({
+      name: LAYOUT.SLIDE.NAME,
+      width: LAYOUT.SLIDE.WIDTH_CM / 2.54,
+      height: LAYOUT.SLIDE.HEIGHT_CM / 2.54,
+    });
+    pptx.layout = LAYOUT.SLIDE.NAME;
+
+    const buildSlideInner = (slide: pptxgen.Slide, pageNum: number, imagesData: ImageData[]) => {
+      slide.background = { fill: options.backgroundColor.replace('#', '') };
+
+      const pageDims = getPageDimensions(pageNum);
+      const cmPerPx = pageDims.maxW / options.containerWidth;
+
+      const pageDisplayRows = [1, 2, 3, 4].map(r => imagesData.filter(img => img.row === r));
+      const { rowResults } = calculateLayoutForAnyPage(pageDisplayRows, pageNum);
+
+      let page2ImagesBottomYcm: number | undefined;
+      let page3ImagesBottomYcm: number | undefined;
+
+      rowResults.forEach(row => {
+        row.images.forEach((item: any) => {
+          const rawXcm = pageDims.left + item.x * cmPerPx;
+          const rawYcm = pageDims.startY + item.y * cmPerPx;
+          const rawWcm = item.w * cmPerPx;
+          const rawHcm = item.h * cmPerPx;
+
+          const placed =
+            pageNum === 1
+              ? clampPage1ImageCm(rawXcm, rawYcm, rawWcm, rawHcm)
+              : { xCm: rawXcm, yCm: rawYcm, wCm: rawWcm, hCm: rawHcm };
+
+          slide.addImage({
+            data: item.img.dataUrl,
+            x: placed.xCm / 2.54,
+            y: placed.yCm / 2.54,
+            w: placed.wCm / 2.54,
+            h: placed.hCm / 2.54,
+            rotate: item.img.rotation,
+          });
+
+          if (pageNum === 2) {
+            const imageBottomYcm = placed.yCm + placed.hCm;
+            page2ImagesBottomYcm =
+              page2ImagesBottomYcm === undefined
+                ? imageBottomYcm
+                : Math.max(page2ImagesBottomYcm, imageBottomYcm);
+          }
+
+          if (pageNum === 3) {
+            const imageBottomYcm = placed.yCm + placed.hCm;
+            page3ImagesBottomYcm =
+              page3ImagesBottomYcm === undefined
+                ? imageBottomYcm
+                : Math.max(page3ImagesBottomYcm, imageBottomYcm);
+          }
+        });
+      });
+
+      addPptxText(slide, pageNum, reportFields, {
+        showPage3,
+        postPlacement,
+        indentPostOnPage3: true,
+        page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
+        page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
+      });
+
+      if (pageNum === 2 && page2PhotoCategoryLabel) {
+        slide.addText(page2PhotoCategoryLabel, {
+          x: 1.04 / 2.54,
+          y: Math.max(
+            LAYOUT.PAGE2.LINES.SEP_TOP.y + 0.3,
+            LAYOUT.PAGE2.TEXT.SECTION_HEADER_PROCEDURE.y - 0.6
+          ) / 2.54,
+          w: 8.0 / 2.54,
+          h: 0.6 / 2.54,
+          fontFace: 'Meiryo',
+          fontSize: 13,
+          bold: true,
+          color: '0F172A',
+        });
+      }
+
+      if (pageNum === 3 && page3PhotoLabelText && imagesData.length > 0) {
+        slide.addText(page3PhotoLabelText, {
+          x: 1.04 / 2.54,
+          y: (LAYOUT.PAGE3.LINES.SEP_TOP.y + 0.3) / 2.54,
+          w: 8.0 / 2.54,
+          h: 0.6 / 2.54,
+          fontFace: 'Meiryo',
+          fontSize: 13,
+          bold: true,
+          color: '0F172A',
+        });
+      }
+    };
+
+    outputPages.forEach(pageNum => {
+      const pageImages = allPagesImages[pageNum] ?? [];
+      const pageConfirmed = pageImages.filter(img => img.row > 0);
+      const slide = pptx.addSlide();
+      buildSlideInner(slide, pageNum, pageConfirmed);
+    });
+
+    return (await pptx.write({ outputType: 'blob' })) as Blob;
+  };
+
+  const handleRequestApproval = async () => {
+    if (!selectedCaseId) { alert('患者を選択してください'); return; }
+    if (isRequestingApproval) return;
+    if (!window.confirm(`${APPROVAL_EMAIL} にPPTXを添付して承認依頼メールを送信します。よろしいですか？`)) return;
+
+    setIsRequestingApproval(true);
+    try {
+      const pptxBlob = await generatePptxBlob();
+      const fileName = `${getOutputBaseName(reportFields)}.pptx`;
+
+      const formData = new FormData();
+      formData.append('to', APPROVAL_EMAIL);
+      formData.append('subject', APPROVAL_SUBJECT);
+      formData.append('body', APPROVAL_BODY);
+      formData.append('file', new File([pptxBlob], getGmailAttachmentName(reportFields, 'pptx'), { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }));
+
+      const response = await fetch(`${SERVER_BASE_URL}/api/gmail/send`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+
+      const statusRes = await fetch(
+        `http://localhost:8787/api/report-cases/${selectedCaseId}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: '承認待ち', approval_vet: APPROVAL_VET }),
+        }
+      );
+      if (statusRes.ok) {
+        const updated = await statusRes.json();
+        setSelectedCaseStatus(updated.status || '');
+        setReportCases(prev => prev.map(item => item.case_id === selectedCaseId ? updated : item));
+      }
+      alert('承認依頼メールを送信しました。');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Approval request failed:', error);
+      alert(`承認依頼メールの送信に失敗しました: ${message}`);
+    } finally {
+      setIsRequestingApproval(false);
+    }
+  };
+
   const downloadPptx = async (e: React.MouseEvent) => {
     e.preventDefault();
     console.log('downloadPptx clicked');
@@ -2550,113 +2752,8 @@ ${svgParts.join('\n')}
     setPptxStatus('保存中…');
 
     try {
-      const pptx = new pptxgen();
-      pptx.defineLayout({
-        name: LAYOUT.SLIDE.NAME,
-        width: LAYOUT.SLIDE.WIDTH_CM / 2.54,
-        height: LAYOUT.SLIDE.HEIGHT_CM / 2.54,
-      });
-      pptx.layout = LAYOUT.SLIDE.NAME;
-
-      const buildSlide = (slide: pptxgen.Slide, pageNum: number, imagesData: ImageData[]) => {
-        slide.background = { fill: options.backgroundColor.replace('#', '') };
-
-        const pageDims = getPageDimensions(pageNum);
-        const cmPerPx = pageDims.maxW / options.containerWidth;
-
-        const pageDisplayRows = [1, 2, 3, 4].map(r => imagesData.filter(img => img.row === r));
-        const { rowResults } = calculateLayoutForAnyPage(pageDisplayRows, pageNum);
-
-        let page2ImagesBottomYcm: number | undefined;
-        let page3ImagesBottomYcm: number | undefined;
-
-        rowResults.forEach(row => {
-          row.images.forEach((item: any) => {
-            const rawXcm = pageDims.left + item.x * cmPerPx;
-            const rawYcm = pageDims.startY + item.y * cmPerPx;
-            const rawWcm = item.w * cmPerPx;
-            const rawHcm = item.h * cmPerPx;
-
-            const placed =
-              pageNum === 1
-                ? clampPage1ImageCm(rawXcm, rawYcm, rawWcm, rawHcm)
-                : { xCm: rawXcm, yCm: rawYcm, wCm: rawWcm, hCm: rawHcm };
-
-            slide.addImage({
-              data: item.img.dataUrl,
-              x: placed.xCm / 2.54,
-              y: placed.yCm / 2.54,
-              w: placed.wCm / 2.54,
-              h: placed.hCm / 2.54,
-              rotate: item.img.rotation,
-            });
-
-            if (pageNum === 2) {
-              const imageBottomYcm = placed.yCm + placed.hCm;
-              page2ImagesBottomYcm =
-                page2ImagesBottomYcm === undefined
-                  ? imageBottomYcm
-                  : Math.max(page2ImagesBottomYcm, imageBottomYcm);
-            }
-
-            if (pageNum === 3) {
-              const imageBottomYcm = placed.yCm + placed.hCm;
-              page3ImagesBottomYcm =
-                page3ImagesBottomYcm === undefined
-                  ? imageBottomYcm
-                  : Math.max(page3ImagesBottomYcm, imageBottomYcm);
-            }
-          });
-        });
-
-        addPptxText(slide, pageNum, reportFields, {
-          showPage3,
-          postPlacement,
-          indentPostOnPage3: true,
-          page2ImagesBottomYcm: pageNum === 2 ? page2ImagesBottomYcm : undefined,
-          page3ImagesBottomYcm: pageNum === 3 ? page3ImagesBottomYcm : undefined,
-        });
-
-        if (pageNum === 2 && page2PhotoCategoryLabel) {
-          slide.addText(page2PhotoCategoryLabel, {
-            x: 1.04 / 2.54,
-            y: Math.max(
-              LAYOUT.PAGE2.LINES.SEP_TOP.y + 0.3,
-              LAYOUT.PAGE2.TEXT.SECTION_HEADER_PROCEDURE.y - 0.6
-            ) / 2.54,
-            w: 8.0 / 2.54,
-            h: 0.6 / 2.54,
-            fontFace: 'Meiryo',
-            fontSize: 13,
-            bold: true,
-            color: '0F172A',
-          });
-        }
-
-        if (pageNum === 3 && page3PhotoLabelText && imagesData.length > 0) {
-          slide.addText(page3PhotoLabelText, {
-            x: 1.04 / 2.54,
-            y: (LAYOUT.PAGE3.LINES.SEP_TOP.y + 0.3) / 2.54,
-            w: 8.0 / 2.54,
-            h: 0.6 / 2.54,
-            fontFace: 'Meiryo',
-            fontSize: 13,
-            bold: true,
-            color: '0F172A',
-          });
-        }
-      };
-
-      outputPages.forEach(pageNum => {
-        const pageImages = allPagesImages[pageNum] ?? [];
-        const pageConfirmed = pageImages.filter(img => img.row > 0);
-
-        const slide = pptx.addSlide();
-        buildSlide(slide, pageNum, pageConfirmed);
-      });
-
+      const pptxBlob = await generatePptxBlob();
       const fileName = `${getOutputBaseName(reportFields)}.pptx`;
-      const pptxBlob = (await pptx.write({ outputType: 'blob' })) as Blob;
 
       // ダウンロード
       const blobUrl = URL.createObjectURL(pptxBlob);
@@ -3096,7 +3193,9 @@ ${svgParts.join('\n')}
             const textTarget = [c.owner_last_name, c.pet_name, c.referring_hospital, c.attending_vet].filter(Boolean).join(' ').toLowerCase();
             const searchOk = !normalizedSearch || textTarget.includes(normalizedSearch);
             const delayOk = !showOnlyDelayedCases || getDelayLabel(getDaysElapsed(c.registered_at)).text === '遅延';
-            return statusOk && searchOk && delayOk;
+            const myVet = (reportFields.attendingVet || '').trim();
+            const myCaseOk = !showOnlyMyCases || !myVet || (c.attending_vet || '').trim() === myVet;
+            return statusOk && searchOk && delayOk && myCaseOk;
           }).slice(0, 6);
           return (
           <div className="lg:col-span-12 mb-0">
@@ -3107,6 +3206,7 @@ ${svgParts.join('\n')}
                   <option value="未処理">未処理</option>
                   <option value="メール送信済み">メール送信済み</option>
                   <option value="印刷郵送済み">印刷郵送済み</option>
+                  <option value="承認待ち">承認待ち</option>
                   <option value="すべて">すべて</option>
                 </select>
                 <input value={caseSearchText} onChange={(e) => setCaseSearchText(e.target.value)} placeholder="飼い主姓 / ペット名 / 紹介病院で検索" className="border rounded px-2 py-1 text-sm min-w-[260px]" />
@@ -3132,13 +3232,21 @@ ${svgParts.join('\n')}
                         <div className="flex items-center gap-2 min-w-0">
                           <span className={`text-sm font-bold tabular-nums w-8 text-right flex-shrink-0 ${delay ? 'text-red-500' : 'text-slate-400'}`}>{days ?? '-'}日</span>
                           <span className="text-lg font-bold text-slate-800 truncate">{c.owner_last_name}{c.pet_name ? `${c.pet_name}ちゃん` : ''}</span>
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-700 whitespace-nowrap">{c.attending_vet || ''}</span>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded whitespace-nowrap ${
+                            c.attending_vet === '町田健吾' ? 'bg-blue-50 text-blue-700' :
+                            c.attending_vet === '江成翔馬' ? 'bg-emerald-50 text-emerald-700' :
+                            c.attending_vet === '神田珠希' ? 'bg-rose-50 text-rose-600' :
+                            c.attending_vet === '小林嵩' ? 'bg-violet-50 text-violet-700' :
+                            c.attending_vet === '金田七海' ? 'bg-amber-50 text-amber-700' :
+                            'bg-slate-100 text-slate-600'
+                          }`}>{c.approval_vet ? `${c.attending_vet} → ${c.approval_vet}` : (c.attending_vet || '')}</span>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
                           <span className={`text-sm px-2.5 py-0.5 rounded-full font-semibold ${
                             c.status === 'メール送信済み' ? 'bg-green-100 text-green-700' :
                             c.status === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
                             c.status === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
+                            c.status === '承認待ち' ? 'bg-purple-100 text-purple-700' :
                             'bg-gray-100 text-gray-600'
                           }`}>{statusLabel}</span>
                           {casePdfMap[c.case_id] && <span title="クリックでPDFを開く" onClick={(e) => { e.stopPropagation(); window.open(`http://localhost:8787/api/case-files/${c.case_id}/completed-pdf`, '_blank'); }} className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
@@ -3168,6 +3276,7 @@ ${svgParts.join('\n')}
                 selectedCaseStatus === 'メール送信済み' ? 'bg-green-100 text-green-700' :
                 selectedCaseStatus === '印刷郵送済み' ? 'bg-orange-100 text-orange-700' :
                 selectedCaseStatus === '報告書作成途中' ? 'bg-blue-100 text-blue-700' :
+                selectedCaseStatus === '承認待ち' ? 'bg-purple-100 text-purple-700' :
                 'bg-gray-100 text-gray-600'
               }`}>{selectedCaseStatus === '報告書作成途中' ? '作成中' : selectedCaseStatus || '未着手'}</span>
               {caseFileStatus.hasCompletedPdf && <span onClick={() => window.open(`http://localhost:8787/api/case-files/${selectedCaseId}/completed-pdf`, '_blank')} className="text-xs px-1.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-700 cursor-pointer hover:bg-emerald-200 transition-colors">PDFあり</span>}
@@ -3181,6 +3290,10 @@ ${svgParts.join('\n')}
               <button type="button" onClick={handleMarkPostalSent} disabled={!selectedCaseId}
                 className="px-3 py-1 rounded-lg bg-orange-500 text-white text-xs font-semibold disabled:opacity-50 hover:bg-orange-600 transition-colors">
                 印刷郵送済み
+              </button>
+              <button type="button" onClick={handleRequestApproval} disabled={!selectedCaseId || isRequestingApproval}
+                className="px-3 py-1 rounded-lg bg-purple-600 text-white text-xs font-semibold disabled:opacity-50 hover:bg-purple-700 transition-colors">
+                {isRequestingApproval ? '送信中…' : '承認待ち'}
               </button>
             </div>
           </div>
@@ -4542,42 +4655,48 @@ ${svgParts.join('\n')}
         
         {pptxStatus && <p className="text-base text-slate-600 font-bold mt-1">{pptxStatus}</p>}
       </div>
-      <div className="flex flex-wrap gap-3">
-        <button onClick={openGmailDraft}
-          disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
-          title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
-          className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-          {isCreatingDraft ? "作成中…" : "Gmail下書き"}
-        </button>
-        {gmailDraftStatus !== 'idle' && (
-          <span className={`text-xs font-medium px-2 py-1 rounded-lg self-center ${
-            gmailDraftStatus === 'success' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
-          }`}>
-            {gmailDraftStatus === 'success' ? '✓ Gmail下書きを作成しました' : 'Gmail下書きの作成に失敗'}
-          </span>
-        )}
-        <button onClick={sendGmail}
-          disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
-          title="PDFを添付してGmailで即時送信します"
-          className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-          {isSendingGmail ? "送信中…" : "Gmail送信"}
-        </button>
-        {gmailSendStatus !== 'idle' && (
-          <span className={`text-xs font-medium px-2 py-1 rounded-lg self-center ${
-            gmailSendStatus === 'success' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
-          }`}>
-            {gmailSendStatus === 'success' ? '✓ Gmailを送信しました' : 'Gmail送信に失敗'}
-          </span>
-        )}
-        <button onClick={printPdf}
-          title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
-          className="bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm flex items-center gap-2">
-          PDF印刷
-        </button>
-        <button onClick={downloadPptx} disabled={isSavingPptx}
-          className="bg-violet-500 hover:bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-          {isSavingPptx ? '保存中…' : 'PPTX出力'}
-        </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
+          <button onClick={openGmailDraft}
+            disabled={isCreatingDraft || !(reportFields.refHospitalEmail || '').trim()}
+            title="Gmail下書きを作成し、PDFを添付します（送信はしません）"
+            className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-200 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {isCreatingDraft ? "作成中…" : "Gmail下書き"}
+          </button>
+          {gmailDraftStatus !== 'idle' && (
+            <span className={`text-xs font-medium px-2 py-1 rounded-lg self-center ${
+              gmailDraftStatus === 'success' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+            }`}>
+              {gmailDraftStatus === 'success' ? '✓ Gmail下書きを作成しました' : 'Gmail下書きの作成に失敗'}
+            </span>
+          )}
+          <button onClick={sendGmail}
+            disabled={isSendingGmail || !(reportFields.refHospitalEmail || '').trim()}
+            title="PDFを添付してGmailで即時送信します"
+            className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {isSendingGmail ? "送信中…" : "Gmail送信"}
+          </button>
+          {gmailSendStatus !== 'idle' && (
+            <span className={`text-xs font-medium px-2 py-1 rounded-lg self-center ${
+              gmailSendStatus === 'success' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'
+            }`}>
+              {gmailSendStatus === 'success' ? '✓ Gmailを送信しました' : 'Gmail送信に失敗'}
+            </span>
+          )}
+        </div>
+        <div className="w-px h-6 bg-slate-200" />
+        <div className="flex items-center gap-2">
+          <button onClick={printPdf}
+            title="印刷ダイアログを開きます（PDF保存/プリンタ印刷）"
+            className="bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow-md rounded-xl px-4 py-2 transition-all focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm flex items-center gap-2">
+            PDF印刷
+          </button>
+          <button onClick={downloadPptx} disabled={isSavingPptx}
+            className="bg-violet-500 hover:bg-violet-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+            {isSavingPptx ? '保存中…' : 'PPTX出力'}
+          </button>
+        </div>
+        <div className="w-px h-6 bg-slate-200" />
         <button onClick={handleSaveDraft}
           className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-xl text-sm font-semibold shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
           入力内容を保存
