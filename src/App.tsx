@@ -7,7 +7,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { LAYOUT } from './layout';
 import TemplatePicker from './components/TemplatePicker';
-import { buildSvgTextParts, addPptxText, getPage1ImageStartYcm } from './reportTextRenderer';
+import { buildSvgTextParts, addPptxText, getPage1ImageStartYcm, getPage2TextHeightCm, getPage3TextHeightCm } from './reportTextRenderer';
 import RowBoard from './components/RowBoard';
 import { fetchSuggestions, addRefHospital } from "./serverApi";
 import { createPortal } from "react-dom";
@@ -1406,27 +1406,38 @@ const App: React.FC = () => {
     });
   }, [currentPage]);
 
+// どこに「経過」を入れるか（既存がこれならOK）
+const [postPlacement, setPostPlacement] = useState<"page2" | "page3">("page2");
+
   // ページごとの配置定義を取得するヘルパー
   const getPageDimensions = useCallback((page: number) => {
     if (page === 2) {
       const config = LAYOUT.PAGE2.IMAGES;
+      const pageBottomCm = (LAYOUT.PAGE2 as any).LINES?.SEP_BOTTOM?.y ?? (LAYOUT.SLIDE.HEIGHT_CM - 1.0);
+      const textH = getPage2TextHeightCm(reportFields, { showPage3, postPlacement });
+      const margin = 0.5;
+      const imageEndY = Math.max(config.START_Y + 1.0, pageBottomCm - margin - textH);
       return {
         left: config.LEFT,
         right: config.RIGHT,
         startY: config.START_Y,
         maxW: LAYOUT.SLIDE.WIDTH_CM - config.LEFT - config.RIGHT,
-        maxH: config.END_Y - config.START_Y,
+        maxH: imageEndY - config.START_Y,
         alignLeft: config.ALIGN_LEFT
       };
     }
     if (page === 3) {
       const config = LAYOUT.PAGE3.IMAGES;
+      const pageBottomCm = (LAYOUT.PAGE3 as any).LINES?.SEP_BOTTOM?.y ?? (LAYOUT.SLIDE.HEIGHT_CM - 1.0);
+      const textH = getPage3TextHeightCm(reportFields, { showPage3, postPlacement });
+      const margin = 0.5;
+      const imageEndY = Math.max(config.START_Y + 1.0, pageBottomCm - margin - textH);
       return {
         left: config.LEFT,
         right: config.RIGHT,
         startY: config.START_Y,
         maxW: LAYOUT.SLIDE.WIDTH_CM - config.LEFT - config.RIGHT,
-        maxH: config.END_Y - config.START_Y,
+        maxH: imageEndY - config.START_Y,
         alignLeft: config.ALIGN_LEFT
       };
     }
@@ -1440,7 +1451,7 @@ const App: React.FC = () => {
       maxH: LAYOUT.SLIDE.HEIGHT_CM - page1ImageStartY - config.MARGIN_BOTTOM,
       alignLeft: config.ALIGN_LEFT
     };
-  }, [reportFields]);
+  }, [reportFields, showPage3, postPlacement]);
 
 
   const [options, setOptions] = useState<LayoutOptions>({
@@ -1501,9 +1512,6 @@ const handleUnassignImage = useCallback((id: string) => {
 
 // PAGE2を出力に含めるか（PAGE3追加時のみ有効）
 const [includePage2InExport, setIncludePage2InExport] = useState(true);
-
-// どこに「経過」を入れるか（既存がこれならOK）
-const [postPlacement, setPostPlacement] = useState<"page2" | "page3">("page2");
 
 
 // 出力順（PDF/PPTXの並びなどで使う想定）
@@ -1955,14 +1963,28 @@ useEffect(() => {
         return baseAR * (isPortrait ? (visH / visW) : (visW / visH));
       });
       const totalAR = ars.reduce((a, b) => a + b, 0);
-      const isFew = !isPage2 && count <= 1;
+      const isPage3 = pageNum === 3;
+      const isFew = !isPage2 && !isPage3 && count <= 1;
       let rowH;
-      if (isPage2) {
-        // PAGE2: always fill container width using post-crop AR, cap at full area height
+      if (isPage2 && count >= 3) {
+        // PAGE2 with 3+ images: fill container width, cap at full area height
         rowH = Math.min(
-          (containerW - Math.max(0, count - 1) * baseSpacing) / totalAR,
+          (containerW - (count - 1) * baseSpacing) / totalAR,
           targetBoxHPx
         );
+      } else if (isPage2) {
+        // PAGE2 with 1-2 images: use 3-image reference size
+        const avgAR = totalAR / count;
+        const refTotalAR = avgAR * 3;
+        rowH = (containerW - 2 * baseSpacing) / refTotalAR;
+      } else if (isPage3 && count >= 3) {
+        // PAGE3 with 3+ images: fill container width (highest priority)
+        rowH = (containerW - (count - 1) * baseSpacing) / totalAR;
+      } else if (isPage3) {
+        // PAGE3 with 1-2 images: use 3-image reference size
+        const avgAR = totalAR / count;
+        const refTotalAR = avgAR * 3;
+        rowH = (containerW - 2 * baseSpacing) / refTotalAR;
       } else if (isFew) {
         const avgAR = totalAR / count;
         const totalAR_for_5 = avgAR * 5;
@@ -1975,7 +1997,7 @@ useEffect(() => {
       return { rowImages, rowH, ars, count, isFew };
     });
     totalBlockHeight += (rawData.length - 1) * baseSpacing;
-    const fitScale = isPage2 ? 1.0 : Math.min(1, targetBoxHPx / totalBlockHeight);
+    const fitScale = Math.min(1, targetBoxHPx / totalBlockHeight);
     const finalSpacing = baseSpacing * fitScale;
     const rowResults: any[] = [];
     let curY = 0;
@@ -1993,13 +2015,31 @@ useEffect(() => {
           imgs.push({ img, x: curX, y: curY, w, h: scaledH });
           curX += w + finalSpacing;
         });
-      } else {
+      } else if (count <= 1) {
+        // 1 image: left-align
         let curX = 0;
-        const dynamicGap = count > 1 ? (containerW - widths.reduce((a, b) => a + b, 0)) / (count - 1) : 0;
         row.rowImages.forEach((img, idx) => {
           const w = widths[idx];
           imgs.push({ img, x: curX, y: curY, w, h: scaledH });
-          curX += w + dynamicGap;
+          curX += w + finalSpacing;
+        });
+      } else if (count === 2) {
+        // 2 images: 3-image ref size, center-align
+        let curX = (containerW - rowTotalWidth) / 2;
+        row.rowImages.forEach((img, idx) => {
+          const w = widths[idx];
+          imgs.push({ img, x: curX, y: curY, w, h: scaledH });
+          curX += w + finalSpacing;
+        });
+      } else {
+        // PAGE2/PAGE3 with 3+ images: re-scale to fill container width regardless of fitScale
+        const fillH = (containerW - (count - 1) * finalSpacing) / row.ars.reduce((a, b) => a + b, 0);
+        const fillWidths = row.ars.map(ar => ar * fillH);
+        let curX = 0;
+        row.rowImages.forEach((img, idx) => {
+          const w = fillWidths[idx];
+          imgs.push({ img, x: curX, y: curY, w, h: fillH });
+          curX += w + finalSpacing;
         });
       }
       rowResults.push({ images: imgs });
@@ -2812,10 +2852,18 @@ ${svgParts.join('\n')}
     const items = group.items.filter((item) => {
       if (item.key === 'page2ThanksBody') return !showPage3;
       if (item.key === 'page3ThanksBody') return showPage3;
+      // PAGE2の術後経過: postPlacement が page3 なら非表示
+      if (item.key === 'page2PostTitle' || item.key === 'page2PostBody') {
+        return !(showPage3 && postPlacement === 'page3');
+      }
+      // PAGE3の術後経過: postPlacement が page2 なら非表示
+      if (item.key === 'page3PostopTitle' || item.key === 'page3PostopBody') {
+        return postPlacement !== 'page2';
+      }
       return true;
     });
     return { ...group, items };
-  }, [previewPage, showPage3]);
+  }, [previewPage, showPage3, postPlacement]);
 
   const resetCurrentPagePreviewYOffsets = useCallback(() => {
     const targetKeys = Array.from(new Set(activePreviewYOffsetGroup.items.map((item) => item.key)));

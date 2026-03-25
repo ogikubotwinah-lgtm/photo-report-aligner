@@ -28,8 +28,6 @@ function getPage1InitialBodyMetricsCm(
   }
 
   const bodyWidthPx = (bodyCfg.w / 2.54) * 96;
-  const bodyHeightPx = (bodyCfg.h / 2.54) * 96;
-  const maxLines = Math.max(1, Math.floor(bodyHeightPx / lineHeightPx));
 
   const initialText = String(reportFields.initialText || '');
   if (initialText.trim() === '') {
@@ -38,11 +36,10 @@ function getPage1InitialBodyMetricsCm(
 
   const ctx = getMeasureContext(fontPx, fontFamily);
   const wrapped = wrapTextByMeasure(initialText, bodyWidthPx, ctx);
-  const visible = clampLines(wrapped, maxLines);
 
   return {
     lineHeightCm,
-    bodyLineCount: Math.max(1, visible.length),
+    bodyLineCount: Math.max(1, wrapped.length),
   };
 }
 
@@ -55,14 +52,10 @@ function getPage1ClosingTextLineCount(
   if (!closingCfg) return 1;
   const closingText = `「${reportFields.chiefComplaint || '[ 主訴 ]'}」という主訴の為、拝見いたしました。`;
   const fontPx = ptToPx(LAYOUT.FONTS.BODY_BASE);
-  const lineHeight = fontPx * 1.15;
   const cwPx = (closingCfg.w / 2.54) * 96;
-  const chPx = (closingCfg.h / 2.54) * 96;
-  const maxLines = Math.max(1, Math.floor(chPx / lineHeight));
   const ctx = getMeasureContext(fontPx, fontFamily);
   const wrapped = wrapTextByMeasure(closingText, cwPx, ctx);
-  const visible = clampLines(wrapped, maxLines);
-  return Math.max(1, visible.length);
+  return Math.max(1, wrapped.length);
 }
 
 function getPage1InitialBlockLayout(
@@ -110,6 +103,142 @@ export function getPage1ImageStartYcm(reportFields: ReportFields) {
   return getPage1InitialBlockLayout(textCfg, reportFields, fontFamily).imageStartY;
 }
 
+/**
+ * PAGE2 の下部テキストが必要とする高さ(cm)を返す純粋計算関数。
+ * 描画は行わない。SVG/PPTX 両方の画像領域計算で共用する。
+ */
+export function getPage2TextHeightCm(
+  reportFields: ReportFields,
+  options?: { showPage3?: boolean; postPlacement?: 'page2' | 'page3' }
+): number {
+  const textCfg = LAYOUT.PAGE2.TEXT as any;
+  const placePostOnPage3 = options?.showPage3 && options?.postPlacement === 'page3';
+
+  const headerProcCfg = textCfg.SECTION_HEADER_PROCEDURE;
+  const bodyProcCfg = textCfg.FREE_TEXT_PROCEDURE;
+  const headerPostCfg = textCfg.SECTION_HEADER_POSTOP;
+  const bodyPostCfg = textCfg.FREE_TEXT_POSTOP;
+
+  const fontPt = LAYOUT.FONTS.BODY_BASE;
+  const fontPx = ptToPx(fontPt);
+  const lineHeightPx = fontPx * 1.15;
+  const lineHeightCm = (lineHeightPx / 96) * 2.54;
+  const fontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
+  const bodyCtx = getMeasureContext(fontPx, fontFamily);
+
+  let height = 0;
+
+  // 【検査・処置内容】ヘッダー
+  if (headerProcCfg) {
+    height += headerProcCfg.h;
+  }
+
+  // 検査本文
+  if (bodyProcCfg && reportFields.procedureText) {
+    const bwPx = bodyProcCfg.w * (96 / 2.54);
+    const wrapped = wrapTextByMeasure(reportFields.procedureText, bwPx, bodyCtx);
+    height += wrapped.length * lineHeightCm;
+  }
+
+  // 術後経過（PAGE3に移動しない場合）
+  if (!placePostOnPage3) {
+    // 1行空け
+    height += lineHeightCm;
+
+    // 【術後経過】ヘッダー
+    if (headerPostCfg) {
+      height += headerPostCfg.h;
+    }
+
+    // 術後経過本文
+    if (bodyPostCfg && reportFields.postText) {
+      const bwPx = bodyPostCfg.w * (96 / 2.54);
+      const wrapped = wrapTextByMeasure(reportFields.postText, bwPx, bodyCtx);
+      height += wrapped.length * lineHeightCm;
+    }
+
+    // お礼文（PAGE3が無効な場合のみ）
+    if (!options?.showPage3) {
+      const thankYouBody = getThankYouBody(reportFields);
+      if (thankYouBody) {
+        // 描画側は最大6行空け(SVG)/5行空け(PPTX)→最低2行まで縮小。安全側で6行見積もる
+        height += 6 * lineHeightCm;
+        const bwPx = (bodyPostCfg?.w ?? 17.0) * (96 / 2.54);
+        const wrapped = wrapTextByMeasure(thankYouBody, bwPx, bodyCtx);
+        height += wrapped.length * lineHeightCm;
+      }
+    }
+  }
+
+  return height;
+}
+
+/**
+ * PAGE3 の下部テキストが必要とする高さ(cm)を返す純粋計算関数。
+ * 描画は行わない。画像領域計算で使用する。
+ */
+export function getPage3TextHeightCm(
+  reportFields: ReportFields,
+  options?: { showPage3?: boolean; postPlacement?: 'page2' | 'page3' }
+): number {
+  const textCfg = LAYOUT.PAGE3.TEXT as any;
+
+  const fontPt = LAYOUT.FONTS.BODY_BASE;
+  const fontPx = ptToPx(fontPt);
+  const lineHeightPx = fontPx * 1.15;
+  const lineHeightCm = (lineHeightPx / 96) * 2.54;
+  const fontFamily = "Meiryo, 'MS PGothic', 'Noto Sans JP', sans-serif";
+  const bodyCtx = getMeasureContext(fontPx, fontFamily);
+
+  let height = 0;
+
+  // 1. 自由入力
+  let hasFreeText = false;
+  if (textCfg.FREE_TEXT_PAGE3 && reportFields.page3Text) {
+    const box = textCfg.FREE_TEXT_PAGE3;
+    const bwPx = box.w * (96 / 2.54);
+    const bhPx = box.h * (96 / 2.54);
+    const maxLines = Math.max(1, Math.floor(bhPx / lineHeightPx));
+    const wrapped = wrapTextByMeasure(reportFields.page3Text, bwPx, bodyCtx);
+    const visible = clampLines(wrapped, maxLines);
+    height += visible.length * lineHeightCm;
+    hasFreeText = true;
+  }
+
+  // 2. 【術後経過】タイトル（PAGE2に術後経過がある場合はスキップ）
+  if (textCfg.SECTION_HEADER_POSTOP_PAGE3 && options?.postPlacement !== 'page2') {
+    if (hasFreeText) height += lineHeightCm; // 自由入力があれば1行空け
+    height += lineHeightCm; // タイトル高さ
+  }
+
+  // 3. 【術後経過】本文（PAGE2に術後経過がある場合はスキップ）
+  if (textCfg.FREE_TEXT_POSTOP_PAGE3 && reportFields.postText && options?.postPlacement !== 'page2') {
+    const box = textCfg.FREE_TEXT_POSTOP_PAGE3;
+    const bwPx = box.w * (96 / 2.54);
+    const bhPx = box.h * (96 / 2.54);
+    const maxLines = Math.max(1, Math.floor(bhPx / lineHeightPx));
+    const wrapped = wrapTextByMeasure(reportFields.postText, bwPx, bodyCtx);
+    const visible = clampLines(wrapped, maxLines);
+    height += visible.length * lineHeightCm;
+  }
+
+  // 4. お礼文（描画側は最大6行gap→最低2行。安全側で6行見積もる）
+  if (textCfg.FREE_TEXT_THANKS_PAGE3) {
+    const thankYouBody = getThankYouBody(reportFields);
+    if (thankYouBody) {
+      height += 6 * lineHeightCm; // gap
+      const box = textCfg.FREE_TEXT_THANKS_PAGE3;
+      const bwPx = box.w * (96 / 2.54);
+      const bhPx = box.h * (96 / 2.54);
+      const maxLines = Math.max(1, Math.floor(bhPx / lineHeightPx));
+      const wrapped = wrapTextByMeasure(thankYouBody, bwPx, bodyCtx);
+      const visible = clampLines(wrapped, maxLines);
+      height += visible.length * lineHeightCm;
+    }
+  }
+
+  return height;
+}
 
 // 医療情報ブロック左端はレイアウト設定内の HOSPITAL_INFO.x を使うため
 // 直接定義は不要。
@@ -657,19 +786,16 @@ if (textCfg.HOSPITAL_EMAIL) {
       const bx2 = slideOffsetX + bodyCfg2.x * pxPerCm;
       const by2 = slideOffsetY + initialBlockLayout.bodyY * pxPerCm;
       const bw2 = bodyCfg2.w * pxPerCm;
-      const bh2 = bodyCfg2.h * pxPerCm;
 
       const fontPt2 = LAYOUT.FONTS.BODY_BASE;
       const fontPx2 = ptToPx(fontPt2);
       const lineHeight2 = fontPx2 * 1.15;
-      const maxLines2 = Math.max(1, Math.floor(bh2 / lineHeight2));
 
       const ctx2 = getMeasureContext(fontPx2, svgFontFamily);
       const wrapped2 = wrapTextByMeasure(reportFields.initialText, bw2, ctx2);
-      const visible2 = clampLines(wrapped2, maxLines2);
 
       const parts2: string[] = [];
-      visible2.forEach((ln, idx) => {
+      wrapped2.forEach((ln, idx) => {
         if (idx === 0)
           parts2.push(`<tspan x="${bx2}" dy="0">${escapeXml(ln)}</tspan>`);
         else
@@ -1282,12 +1408,14 @@ if (textCfg.SEAL) {
 
     // 初診時本文
     if (textCfg.FREE_TEXT_INITIAL && reportFields.initialText) {
-      const fitSize = fitTextToBox(reportFields.initialText, textCfg.FREE_TEXT_INITIAL, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
+      const bodyHeightCm = initialBlockLayout.imagesHeaderY - initialBlockLayout.bodyY;
+      const effectiveH = Math.max(textCfg.FREE_TEXT_INITIAL.h, bodyHeightCm);
+      const fitSize = fitTextToBox(reportFields.initialText, { ...textCfg.FREE_TEXT_INITIAL, h: effectiveH }, LAYOUT.FONTS.BODY_BASE, LAYOUT.FONTS.MIN_SIZE);
       slide.addText(reportFields.initialText, {
         x: cmToInch(textCfg.FREE_TEXT_INITIAL.x),
         y: cmToInch(initialBlockLayout.bodyY),
         w: cmToInch(textCfg.FREE_TEXT_INITIAL.w),
-        h: cmToInch(textCfg.FREE_TEXT_INITIAL.h),
+        h: cmToInch(effectiveH),
         fontSize: fitSize,
         valign: 'top',
         wrap: true
