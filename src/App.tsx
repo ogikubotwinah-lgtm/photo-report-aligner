@@ -418,7 +418,7 @@ function buildEmailFilename(reportFields: { ownerLastName?: string; petName?: st
 
 function getInitialReportFields() {
   return {
-    reportDate: '',
+    reportDate: new Date().toISOString().slice(0, 10),
     refHospitalName: '',
     refHospital: '',
     refHospitalEmail: '',
@@ -545,6 +545,9 @@ const App: React.FC = () => {
     }
     setCurrentPage(page);
     closeEditUiState();
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 60, behavior: 'smooth' });
+    });
   }, [showPage3]);
 
   // showPage3 をOFFにした瞬間に 3ページ目に居たら 2へ戻す
@@ -897,6 +900,13 @@ const App: React.FC = () => {
       setNewCaseAttendingVet('町田健吾');
 
       alert('新規患者を登録しました。');
+      requestAnimationFrame(() => {
+        const el = document.getElementById('first-visit-date-input');
+        if (!el) return;
+        const top = el.getBoundingClientRect().top + window.scrollY - 80;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+        el.focus({ preventScroll: true });
+      });
     } catch (err: any) {
       alert(err?.message || '新規患者登録に失敗しました。');
     } finally {
@@ -1042,9 +1052,14 @@ const App: React.FC = () => {
   const [reportFields, setReportFields] = useState(getInitialReportFields);
   const [chartInput, setChartInput] = useState('');
   const [isAiFormatting, setIsAiFormatting] = useState(false);
+  const [aiFormatError, setAiFormatError] = useState('');
 
   const handleAiFormat = useCallback(async () => {
-    if (!chartInput.trim()) return;
+    setAiFormatError('');
+    if (!chartInput.trim()) {
+      setAiFormatError('カルテ文章を入力してください');
+      return;
+    }
     setIsAiFormatting(true);
     try {
       const res = await fetch('http://localhost:8787/api/ai-format', {
@@ -1052,6 +1067,10 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chart: chartInput }),
       });
+      if (!res.ok) {
+        setAiFormatError('AI整形に失敗しました');
+        return;
+      }
       const data = await res.json();
       const s = data.sections || {};
       setReportFields(prev => ({
@@ -1061,8 +1080,15 @@ const App: React.FC = () => {
         procedureText: s['処置内容'] ?? prev.procedureText,
         postText: s['術後経過'] ?? prev.postText,
       }));
+      requestAnimationFrame(() => {
+        const el = document.getElementById('chief-complaint-input');
+        if (!el) return;
+        const top = el.getBoundingClientRect().top + window.scrollY - 80;
+        window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      });
     } catch (err) {
       console.error(err);
+      setAiFormatError('AI整形に失敗しました');
     } finally {
       setIsAiFormatting(false);
     }
@@ -1910,7 +1936,6 @@ useEffect(() => {
   const getImageDisplayStyle = useCallback((img: ImageData): CSSProperties => {
     const crop = getImageCrop(img);
     const isActiveCropTarget = activeCropImageId === img.id && !!activeCropViewportRect;
-    console.log('DISPLAY STYLE', { imgId: img.id, crop: getImageCrop(img), isActiveCropTarget: activeCropImageId === img.id && !!activeCropViewportRect, activeCropViewportRect, rotation: img.rotation, flipX: img.flipX, flipY: img.flipY });
 
     const flipX = img.flipX ? -1 : 1;
     const flipY = img.flipY ? -1 : 1;
@@ -3309,9 +3334,9 @@ ${svgParts.join('\n')}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
             <div className="font-bold text-sm text-slate-700 mb-2">新規患者登録</div>
             <div className="flex items-center gap-2 text-sm">
-              <input value={newCaseOwnerLastName} onChange={(e) => setNewCaseOwnerLastName(e.target.value)} placeholder="飼い主姓" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-              <input value={newCasePetName} onChange={(e) => setNewCasePetName(e.target.value)} placeholder="ペット名" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-              <select value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+              <input id="new-case-owner-input" value={newCaseOwnerLastName} onChange={(e) => setNewCaseOwnerLastName(e.target.value)} placeholder="飼い主姓" className="border border-slate-200 rounded-lg px-2 py-1.5" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('new-case-pet-input')?.focus(); } }} />
+              <input id="new-case-pet-input" value={newCasePetName} onChange={(e) => setNewCasePetName(e.target.value)} placeholder="ペット名" className="border border-slate-200 rounded-lg px-2 py-1.5" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('new-case-vet-select')?.focus(); } }} />
+              <select id="new-case-vet-select" value={newCaseAttendingVet} onChange={(e) => setNewCaseAttendingVet(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreateCase(); } }}>
                 <option value=""></option>
                 {ATTENDING_VET_OPTIONS.map(name => (
                   <option key={name} value={name}>{name}</option>
@@ -3620,6 +3645,7 @@ ${svgParts.join('\n')}
                     <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">初診日</label>
                     <div className="relative" data-date-field="firstVisitDate">
                       <input
+                        id="first-visit-date-input"
                         className={`w-full h-11 border rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all cursor-pointer ${getEmptyFieldToneClass(reportFields.firstVisitDate, 4)} bg-white`}
                         onFocus={() => setFocusedFieldIndex(4)}
                         placeholder=""
@@ -3969,6 +3995,7 @@ ${svgParts.join('\n')}
                 >
                   {isAiFormatting ? '整形中...' : 'AI整形'}
                 </button>
+                {aiFormatError && <p className="text-red-500 text-xs mt-1">{aiFormatError}</p>}
               </div>
 
               {/* 主訴（新規：テキスト入力） */}
