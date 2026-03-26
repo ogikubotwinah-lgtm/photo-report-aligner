@@ -1040,6 +1040,34 @@ const App: React.FC = () => {
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
   const [reportFields, setReportFields] = useState(getInitialReportFields);
+  const [chartInput, setChartInput] = useState('');
+  const [isAiFormatting, setIsAiFormatting] = useState(false);
+
+  const handleAiFormat = useCallback(async () => {
+    if (!chartInput.trim()) return;
+    setIsAiFormatting(true);
+    try {
+      const res = await fetch('http://localhost:8787/api/ai-format', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chart: chartInput }),
+      });
+      const data = await res.json();
+      const s = data.sections || {};
+      setReportFields(prev => ({
+        ...prev,
+        chiefComplaint: s['主訴'] ?? prev.chiefComplaint,
+        initialText: s['初診時'] ?? prev.initialText,
+        procedureText: s['処置内容'] ?? prev.procedureText,
+        postText: s['術後経過'] ?? prev.postText,
+      }));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsAiFormatting(false);
+    }
+  }, [chartInput]);
+
   const [previewYOffsets, setPreviewYOffsets] = useState<PreviewYOffsetMap>(PREVIEW_Y_OFFSET_INITIAL);
 
   const page2PhotoCategoryLabel = useMemo(() => {
@@ -3920,6 +3948,27 @@ ${svgParts.join('\n')}
             <div className="grid grid-cols-1 gap-4 border border-rose-200 bg-rose-50/40 rounded-xl p-4">
               <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-200">
                 <div className="text-lg font-semibold text-slate-800 tracking-tight">報告内容</div>
+              </div>
+
+              {/* カルテ入力 & AI整形 */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-700 uppercase tracking-widest">カルテ入力</label>
+                <textarea
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-base focus:ring-2 focus:ring-orange-500 outline-none transition-all bg-white"
+                  style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word' }}
+                  rows={9}
+                  placeholder="ここにカルテ文章を貼り付けてください"
+                  value={chartInput}
+                  onChange={e => setChartInput(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  disabled={isAiFormatting}
+                  onClick={handleAiFormat}
+                >
+                  {isAiFormatting ? '整形中...' : 'AI整形'}
+                </button>
               </div>
 
               {/* 主訴（新規：テキスト入力） */}
