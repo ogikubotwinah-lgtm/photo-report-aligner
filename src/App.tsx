@@ -1,16 +1,27 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import type { CSSProperties } from 'react';
-import type { ImageData, LayoutOptions } from './types';
-import LayoutControls from './components/LayoutControls';
-import pptxgen from 'pptxgenjs';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
-import { LAYOUT } from './layout';
 import TemplatePicker from './components/TemplatePicker';
 import { buildSvgTextParts, addPptxText, getPage1ImageStartYcm, getPage2TextHeightCm, getPage3TextHeightCm } from './reportTextRenderer';
 import RowBoard from './components/RowBoard';
 import { fetchSuggestions, addRefHospital } from "./serverApi";
 import { createPortal } from "react-dom";
+
+import type { ImageData, ImageCrop, LayoutOptions } from './types';
+import { LAYOUT } from './layout';
+
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import pptxgen from 'pptxgenjs';
+import LayoutControls from './components/LayoutControls';
+import TEMPLATES from './data/templates';
+// ...他の必要なimportもここに追加...
+
+// --- 既存のApp本体は下部のconst App: React.FC = () => { ... }に一本化 ---
+
+
+// --- 既存のApp本体は下部のconst App: React.FC = () => { ... }に一本化 ---
+// --- 上部のApp関数定義を削除し、下部のconst App: React.FC = () => { ... }のみ残す ---
 
 
 type AppSuggestions = {
@@ -522,6 +533,54 @@ const PageSwitcher: React.FC<PageSwitcherProps> = ({
 
 
 const App: React.FC = () => {
+      // useStateを最上部に
+      const [focusedFieldIndex, setFocusedFieldIndex] = useState<number | null>(null);
+      const [reportFields, setReportFields] = useState(getInitialReportFields);
+
+      // currentSectionをuseStateの下に
+      const fieldToSection: Record<number, string> = {
+        10: '主訴',
+        11: '初診時',
+        12: '処置内容',
+        13: '術後経過',
+      };
+      const currentSection = fieldToSection[focusedFieldIndex ?? -1] || undefined;
+
+      // filteredTemplates: 入力補助テンプレートのフィルタリング（既存ロジックをそのまま）
+      const filteredTemplates = useMemo(() => {
+        if (!currentSection) return TEMPLATES;
+        const filtered = TEMPLATES.filter(t => t.section === currentSection || t.section === '共通');
+        const base = filtered.length > 0 ? filtered : TEMPLATES;
+        const synonymMap: Record<string, string[]> = {
+          歯肉炎: ['炎症', '発赤', '腫脹', '歯ぐき腫れ'],
+          出血: ['出血', '出血あり', '血が出る'],
+          口臭: ['口臭', '臭い', 'におい'],
+          破折: ['破折', '折れ', '割れ'],
+        };
+        let inputText = '';
+        if (currentSection === '主訴') inputText = reportFields.chiefComplaint || '';
+        else if (currentSection === '初診時') inputText = reportFields.initialText || '';
+        else if (currentSection === '処置内容') inputText = reportFields.procedureText || '';
+        else if (currentSection === '術後経過') inputText = reportFields.postText || '';
+        const scored = base.map((t, idx) => {
+          const kws = t.keywords || [];
+          let score = 0;
+          for (const kw of kws) {
+            if (kw && inputText.includes(kw)) score++;
+            if (kw && synonymMap[kw]) {
+              for (const syn of synonymMap[kw]) {
+                if (syn && inputText.includes(syn)) {
+                  score++;
+                  break;
+                }
+              }
+            }
+          }
+          return { t, score, idx };
+        });
+        scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
+        return scored.map(s => s.t);
+      }, [currentSection, reportFields.chiefComplaint, reportFields.initialText, reportFields.procedureText, reportFields.postText]);
     // 紹介病院名input用ref
     // --- 編集モード用state ---
       const [editingImageId, setEditingImageId] = useState<string | null>(null);
@@ -1049,7 +1108,6 @@ const App: React.FC = () => {
   } | null>(null);
 
   // 報告書テキスト入力ステート（この下に既存の reportFields を続けてOK）
-  const [reportFields, setReportFields] = useState(getInitialReportFields);
   const [chartInput, setChartInput] = useState('');
   const [isAiFormatting, setIsAiFormatting] = useState(false);
   const [aiFormatError, setAiFormatError] = useState('');
@@ -3264,7 +3322,6 @@ ${svgParts.join('\n')}
     return 'mt-4';
   }, [filledDateCount]);
 
-  const [focusedFieldIndex, setFocusedFieldIndex] = useState<number>(-1);
 
   const getEmptyFieldToneClass = useCallback((value: unknown, fieldIndex?: number) => {
     if (focusedFieldIndex < 0 || fieldIndex == null || fieldIndex >= focusedFieldIndex) {
@@ -4300,6 +4357,7 @@ ${svgParts.join('\n')}
             </div>
             {/* テンプレートピッカー */}
             <TemplatePicker
+              templates={filteredTemplates}
               onInsert={(field, text, mode) => {
                 const prev = reportFields[field as 'initialText' | 'procedureText' | 'postText'] || '';
                 // replace のときは既存テキストがある場合に確認

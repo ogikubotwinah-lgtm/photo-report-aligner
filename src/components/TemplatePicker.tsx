@@ -8,19 +8,20 @@ type Props = {
   onUndo: () => void;
   canUndo: boolean;
   undoLabel?: string;
+  templates?: TemplateItem[];
 };
 
-export default function TemplatePicker({ onInsert, onUndo, canUndo, undoLabel }: Props) {
+export default function TemplatePicker({ onInsert, onUndo, canUndo, undoLabel, templates: templatesProp }: Props) {
   const [q, setQ] = useState('');
   const [mode, setMode] = useState<'append' | 'replace'>('append');
-
+  const templates = typeof templatesProp !== 'undefined' ? templatesProp : TEMPLATES;
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    if (!ql) return TEMPLATES;
-    return TEMPLATES.filter(t =>
+    if (!ql) return templates;
+    return templates.filter(t =>
       t.title.toLowerCase().includes(ql) || t.text.toLowerCase().includes(ql) || (t.tags || []).some(tag => tag.includes(ql))
     );
-  }, [q]);
+  }, [q, templates]);
 
   return (
     <div className="mt-4 bg-white p-4 rounded-xl border border-slate-200">
